@@ -1954,27 +1954,74 @@ function apiFixtureToLocal(raw,oddsInfo,dateTag){
   };
 }
 
+async function resolveLeagueSeason(leagueId){
+  // Önce kullanıcının seçtiği sezonu kullan. Veri yoksa API'deki aktif/en yeni sezonu bul.
+  const wanted=safeNum(API_CONFIG.season,new Date().getFullYear());
+  try{
+    const d=await apiFetch('/leagues',{id:leagueId});
+    const item=Array.isArray(d.response)?d.response[0]:null;
+    const seasons=Array.isArray(item?.seasons)?item.seasons:[];
+    const current=seasons.filter(x=>x.current===true).sort((a,b)=>Number(b.year)-Number(a.year));
+    if(current.length) return Number(current[0].year);
+    if(seasons.some(x=>Number(x.year)===wanted)) return wanted;
+    const latest=seasons.slice().sort((a,b)=>Number(b.year)-Number(a.year));
+    return latest.length?Number(latest[0].year):wanted;
+  }catch(e){
+    console.warn('Lig sezonu çözülemedi',leagueId,e);
+    return wanted;
+  }
+}
+
 async function fetchApiFixturesForRange(fromDate,toDate){
   const out=[];
   const leagues=API_CONFIG.leagues||[];
-  // Her lig için tek from/to çağrısı: 7 lig × 1 istek yerine gün gün onlarca istek yapmayalım.
+  const diagnostics=[];
+
   for(const leagueId of leagues){
     try{
-      const data=await apiFetch('/fixtures',{
+      let season=API_CONFIG.season;
+      let data=await apiFetch('/fixtures',{
         league:leagueId,
-        season:API_CONFIG.season,
+        season:season,
         from:apiDate(fromDate),
         to:apiDate(toDate),
         timezone:'Europe/Istanbul'
       });
-      for(const raw of (data.response||[])){
-        const local=apiFixtureToLocal(raw,null,'next7days');
+      let response=Array.isArray(data.response)?data.response:[];
+
+      // Seçilen sezonda hiç maç dönmezse, sezonu API'den doğrula ve yalnızca
+      // bu lig için ikinci, kontrollü bir istek yap.
+      if(!response.length){
+        const resolved=await resolveLeagueSeason(leagueId);
+        if(Number(resolved)!==Number(season)){
+          season=resolved;
+          data=await apiFetch('/fixtures',{
+            league:leagueId,
+            season:season,
+            from:apiDate(fromDate),
+            to:apiDate(toDate),
+            timezone:'Europe/Istanbul'
+          });
+          response=Array.isArray(data.response)?data.response:[];
+        }
+      }
+
+      diagnostics.push(`${leagueId}:${response.length} maç (sezon ${season})`);
+      for(const raw of response){
+        const local=apiFixtureToLocal(raw,null,'next14days');
         if(local) out.push(local);
       }
-    }catch(e){ console.warn('Fixture API error',leagueId,e); }
+    }catch(e){
+      diagnostics.push(`${leagueId}:HATA ${e.message}`);
+      console.warn('Fixture API error',leagueId,e);
+    }
   }
+
+  // Teşhis bilgisini bağlantı hatası olduğunda kullanıcıya göstermek için sakla.
+  window.__API_FIXTURE_DIAGNOSTICS=diagnostics;
   return out;
 }
+
 async function loadRealApiFixtures(){
   if(!API_CONFIG.key) return false;
 
@@ -1982,8 +2029,9 @@ async function loadRealApiFixtures(){
   await resolveBet365Bookmaker();
 
   const today=new Date();
-  // Bugün/yarın boşsa sistemi gereksiz yere hata vermesin. Önümüzdeki 7 günü tarıyoruz.
-  const endDate=addDays(today,7);
+  // Önümüzdeki 14 günü tarıyoruz. Tarih aralığı tek çağrı/lig olduğundan
+  // gereksiz gün gün sorgu yapılmaz.
+  const endDate=addDays(today,14);
   const fixtures=await fetchApiFixturesForRange(today,endDate);
 
   const unique=[]; const seen=new Set();
@@ -1992,10 +2040,12 @@ async function loadRealApiFixtures(){
   });
 
   if(!unique.length){
-    throw new Error('Seçilen liglerde önümüzdeki 7 gün içinde API fikstürü bulunamadı. Sezonun ve lig ID\'lerinin doğru olduğundan emin olun.');
+    const detail=(window.__API_FIXTURE_DIAGNOSTICS||[]).join(' • ');
+    throw new Error('API bağlantısı çalışıyor fakat seçilen liglerde maç dönmedi. '+detail+' Sezon alanını API\'de bulunan sezonla kontrol edin.');
   }
 
-  // Free planda kota korunması için en fazla 35 maçı Bet365 odds açısından kontrol et.
+  // Free plan kotasını korumak için Bet365 odds sorgusu yalnızca gerekli
+  // maçlarda ve sınırlı sayıda yapılır.
   const limited=unique.slice(0,35);
   const withBet365=[];
 
@@ -2003,12 +2053,10 @@ async function loadRealApiFixtures(){
     const odds=await fetchApiOdds(fx.id);
     if(odds?.info){
       const selected=selectBet365Snapshots(fx,odds.history||[]);
-      if(selected.open && selected.t15){
+      if(selected.open){
         fx.openOdds={h:selected.open.h,d:selected.open.d,a:selected.open.a};
-        fx.t15Odds={h:selected.t15.h,d:selected.t15.d,a:selected.t15.a};
-        fx.timeline=selected.timeline.map(x=>({
-          t:new Date(x.t),h:x.h,d:x.d,a:x.a
-        }));
+        fx.t15Odds=selected.t15?{h:selected.t15.h,d:selected.t15.d,a:selected.t15.a}:null;
+        fx.timeline=selected.timeline.map(x=>({t:new Date(x.t),h:x.h,d:x.d,a:x.a}));
         fx.bookmaker=BET365_NAME;
         fx.bookmakerId=odds.info.bookmakerId||BET365_RESOLVED_ID;
         fx.oddsHistoryCount=(odds.history||[]).length;
@@ -2019,9 +2067,9 @@ async function loadRealApiFixtures(){
     }
   }
 
-  // KRİTİK: Bet365 oranı olmayan maçlar analizden çıkarılır.
+  // Bet365 olmayan maçlar analizden çıkarılır. Başka bookmaker kesinlikle kullanılmaz.
   if(!withBet365.length){
-    throw new Error('Seçilen maçlarda Bet365 MS 1/X/2 oranı bulunamadı. Başka bookmaker kullanılmayacak.');
+    throw new Error('Fikstürler bulundu ancak bu maçların hiçbirinde Bet365 MS 1/X/2 oranı dönmedi. API-Football odds kapsamını veya maçın odds penceresini kontrol edin.');
   }
 
   API_FIXTURES=withBet365;
@@ -2029,7 +2077,6 @@ async function loadRealApiFixtures(){
   apiSetStatus('ok','LIVE API + BET365 bağlı — '+withBet365.length+' maç analiz ediliyor.');
   return true;
 }
-
 function rebuildApiPipeline(){
   FIXTURES=API_FIXTURES.filter(fx=>
     fx.realApi &&
