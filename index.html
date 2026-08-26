@@ -1,1 +1,33 @@
-
+<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MACANALİZ PRO</title>
+<style>
+:root{--bg:#090c11;--p:#12161f;--p2:#171d28;--l:#273142;--t:#edf2f7;--m:#8e9bad;--g:#19c37d;--r:#ff5364;--a:#f4b942}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px system-ui}header{padding:18px 22px;border-bottom:1px solid var(--l);position:sticky;top:0;background:#0d1118ee;z-index:2}h1{margin:0;font-size:20px}.sub,.small{color:var(--m);font-size:12px}.wrap{max-width:1400px;margin:auto;padding:20px}.grid{display:grid;grid-template-columns:280px 1fr;gap:16px}.panel,.card{background:var(--p);border:1px solid var(--l);border-radius:12px;padding:16px}label{display:block;color:var(--m);font-size:11px;margin:13px 0 6px;text-transform:uppercase}input,select,button{width:100%;padding:10px;border-radius:8px;border:1px solid var(--l);background:var(--p2);color:var(--t)}button{cursor:pointer;font-weight:700}.primary{background:var(--g);color:#06150f}.status{padding:10px;border:1px solid var(--l);border-radius:8px;margin-bottom:10px;line-height:1.4}.ok{color:var(--g)}.bad{color:var(--r)}.warn{color:var(--a)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric{font-size:24px;font-weight:800}.scroll{overflow:auto;margin-top:16px}table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;border-bottom:1px solid var(--l);white-space:nowrap;text-align:left}th{color:var(--m);font-size:11px}.pick{color:var(--g);font-weight:800}.notice{padding:10px;background:#211b0f;border:1px solid #4b3b1c;border-radius:8px;color:#f6d58a;margin-top:12px}@media(max-width:850px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}}
+</style></head><body>
+<header><h1>MACANALİZ PRO</h1><div class="sub">5 Büyük Lig + Süper Lig · Bet365 ONLY · 1X2 · Top 5</div></header>
+<div class="wrap"><div class="grid"><aside class="panel">
+<div id="status" class="status"><span class="warn">● DEMO</span><br>Backend URL girilmedi.</div>
+<label>Backend URL</label><input id="url" placeholder="https://...onrender.com">
+<label>Lig ID'leri</label><input id="leagues" value="39,140,135,78,61,203">
+<label>Gün</label><select id="days"><option>3</option><option selected>7</option><option>14</option></select>
+<label>Sezon (opsiyonel)</label><input id="season" placeholder="Boş bırak: backend kullanır">
+<button class="primary" style="margin-top:14px" onclick="connect()">API'yi Test Et</button>
+<button style="margin-top:8px" onclick="load()">Maçları Getir</button>
+<button style="margin-top:8px" onclick="demo()">Demo Modu</button>
+<div class="notice"><b>Bet365 kuralı:</b> Bet365 1X2 yoksa maç analize alınmaz. Başka bookmaker kullanılmaz.</div>
+<div class="small" style="margin-top:10px">T-15 gerçek zamanlı geçmişi API'nin kendi verisinden geriye dönük garanti edilemez; snapshot toplama gerekir.</div>
+</aside><main>
+<div class="cards"><div class="card"><div class="small">MAÇ</div><div id="count" class="metric">0</div></div><div class="card"><div class="small">BET365</div><div id="bcount" class="metric">0</div></div><div class="card"><div class="small">TOP 5</div><div id="top" class="metric">0</div></div></div>
+<div class="panel scroll"><table><thead><tr><th>Lig</th><th>Maç</th><th>Tarih</th><th>1</th><th>X</th><th>2</th><th>Olasılık</th><th>Seçim</th></tr></thead><tbody id="rows"></tbody></table></div>
+</main></div></div>
+<script>
+const S={items:[]};const $=x=>document.getElementById(x);const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function set(t,m){$('status').innerHTML='<span class="'+t+'">● '+(t==='ok'?'CANLI API':t==='bad'?'HATA':'BİLGİ')+'</span><br>'+esc(m)}
+function base(){return $('url').value.trim().replace(/\/+$/,'')}
+async function get(p){if(!base())throw Error('Backend URL girilmedi.');let r=await fetch(base()+p);let d;try{d=await r.json()}catch{throw Error('Backend JSON döndürmedi. HTTP '+r.status)}if(!r.ok)throw Error(d.detail||'HTTP '+r.status);return d}
+async function connect(){try{await get('/api/health');let b=await get('/api/bet365');set('ok','Backend çalışıyor. '+(b.bookmaker?.name||'Bet365')+' ID: '+b.bookmaker?.id)}catch(e){set('bad',e.message)}}
+async function load(){try{let q='/api/fixtures?ids='+encodeURIComponent($('leagues').value)+'&days='+$('days').value;let s=$('season').value.trim();if(s)q+='&season='+encodeURIComponent(s);let d=await get(q),a=[];for(const f of d.fixtures||[]){try{let o=await get('/api/odds?fixture='+f.fixture.id);if(o.available&&o.odds)a.push({fixture:f,odds:o.odds})}catch{}}S.items=a;set('ok',a.length+' maçta Bet365 1X2 bulundu.');render()}catch(e){set('bad',e.message)}}
+function score(x){let o=x.odds,p=[1/o.home,1/o.draw,1/o.away],z=p[0]+p[1]+p[2];return Math.max(...p)/z*100}
+function pick(x){let o=x.odds,a=[['1',o.home],['X',o.draw],['2',o.away]];a.sort((x,y)=>x[1]-y[1]);return a[0][0]}
+function render(){let a=[...S.items].sort((x,y)=>score(y)-score(x));$('count').textContent=a.length;$('bcount').textContent=a.length;$('top').textContent=Math.min(5,a.length);$('rows').innerHTML=a.map(x=>{let f=x.fixture,o=x.odds;return '<tr><td>'+esc(f.league?.name)+'</td><td><b>'+esc(f.teams?.home?.name)+'</b> — '+esc(f.teams?.away?.name)+'</td><td>'+new Date(f.fixture.date).toLocaleString('tr-TR')+'</td><td>'+Number(o.home).toFixed(2)+'</td><td>'+Number(o.draw).toFixed(2)+'</td><td>'+Number(o.away).toFixed(2)+'</td><td>'+score(x).toFixed(1)+'%</td><td class="pick">'+pick(x)+'</td></tr>'}).join('')||'<tr><td colspan="8" class="small">Bet365 verili maç yok.</td></tr>'}
+function demo(){S.items=[{fixture:{fixture:{id:1,date:new Date(Date.now()+86400000).toISOString()},league:{name:'Premier League'},teams:{home:{name:'Demo FC'},away:{name:'Demo United'}}},odds:{home:1.72,draw:3.75,away:4.8}},{fixture:{fixture:{id:2,date:new Date(Date.now()+2*86400000).toISOString()},league:{name:'Süper Lig'},teams:{home:{name:'Örnekspor'},away:{name:'Demo FK'}}},odds:{home:2.05,draw:3.3,away:3.45}}];set('warn','Demo veri gösteriliyor. Canlı veri için backend URL gir.');render()}demo()
+</script></body></html>
