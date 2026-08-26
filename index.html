@@ -1778,7 +1778,11 @@ function saveApiConfig(){
   const safe={...API_CONFIG};
   localStorage.setItem('macanaliz_api_config',JSON.stringify(safe));
 }
-function apiDate(d){ return d.toISOString().slice(0,10); }
+function apiDate(d){
+  // Türkiye yerel tarihini kullan; UTC dönüşümü gece yarısında tarihi kaydırmasın.
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 function apiSetStatus(type,text){
   const el=document.getElementById('apiStatus'); if(!el) return;
   el.className='api-status '+(type||'');
@@ -1950,14 +1954,21 @@ function apiFixtureToLocal(raw,oddsInfo,dateTag){
   };
 }
 
-async function fetchApiFixturesForDate(date,tag){
+async function fetchApiFixturesForRange(fromDate,toDate){
   const out=[];
   const leagues=API_CONFIG.leagues||[];
+  // Her lig için tek from/to çağrısı: 7 lig × 1 istek yerine gün gün onlarca istek yapmayalım.
   for(const leagueId of leagues){
     try{
-      const data=await apiFetch('/fixtures',{league:leagueId,season:API_CONFIG.season,date:date});
+      const data=await apiFetch('/fixtures',{
+        league:leagueId,
+        season:API_CONFIG.season,
+        from:apiDate(fromDate),
+        to:apiDate(toDate),
+        timezone:'Europe/Istanbul'
+      });
       for(const raw of (data.response||[])){
-        const local=apiFixtureToLocal(raw,null,tag);
+        const local=apiFixtureToLocal(raw,null,'next7days');
         if(local) out.push(local);
       }
     }catch(e){ console.warn('Fixture API error',leagueId,e); }
@@ -1971,22 +1982,21 @@ async function loadRealApiFixtures(){
   await resolveBet365Bookmaker();
 
   const today=new Date();
-  const tomorrow=addDays(today,1);
-  const [a,b]=await Promise.all([
-    fetchApiFixturesForDate(apiDate(today),'today'),
-    fetchApiFixturesForDate(apiDate(tomorrow),'tomorrow')
-  ]);
+  // Bugün/yarın boşsa sistemi gereksiz yere hata vermesin. Önümüzdeki 7 günü tarıyoruz.
+  const endDate=addDays(today,7);
+  const fixtures=await fetchApiFixturesForRange(today,endDate);
 
-  let fixtures=[...a,...b];
   const unique=[]; const seen=new Set();
   fixtures.forEach(f=>{
     if(!seen.has(f.id)){seen.add(f.id);unique.push(f);}
   });
 
-  if(!unique.length) throw new Error('Seçilen liglerde bugün/yarın API fikstürü bulunamadı.');
+  if(!unique.length){
+    throw new Error('Seçilen liglerde önümüzdeki 7 gün içinde API fikstürü bulunamadı. Sezonun ve lig ID\'lerinin doğru olduğundan emin olun.');
+  }
 
-  // Free planda kota korunması için ilk 40 maçı kontrol et.
-  const limited=unique.slice(0,40);
+  // Free planda kota korunması için en fazla 35 maçı Bet365 odds açısından kontrol et.
+  const limited=unique.slice(0,35);
   const withBet365=[];
 
   for(const fx of limited){
