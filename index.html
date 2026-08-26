@@ -1803,7 +1803,12 @@ async function apiFetch(path,params={}){
   const cacheKey=u.toString();
   const cached=API_CACHE.get(cacheKey);
   if(cached && Date.now()-cached.time<15000) return cached.data;
-  const res=await fetch(u.toString(),{headers:{'x-apisports-key':API_CONFIG.key,'Accept':'application/json'}});
+  let res;
+  try{
+    res=await fetch(u.toString(),{method:'GET',headers:{'x-apisports-key':API_CONFIG.key,'Accept':'application/json'}});
+  }catch(e){
+    throw new Error('API ağına erişilemedi (Failed to fetch). GitHub Pages tarayıcı isteği engelliyorsa backend/proxy gerekir. URL: '+u.pathname);
+  }
   let data=null;
   try{ data=await res.json(); }catch(e){ throw new Error('API geçerli JSON döndürmedi.'); }
   if(!res.ok) throw new Error((data&&data.message)||('HTTP '+res.status));
@@ -1854,43 +1859,18 @@ function findOddsTriplet(oddsResponse,preferred){
 }
 
 async function resolveBet365Bookmaker(){
-  // Bet365 ID'sini her bağlantıda yeniden aramak yerine önce kaydedilmiş ID'yi kullan.
-  // API-Football'da Bet365 için yaygın bookmaker ID 8'dir; yine de API'den doğrularız.
-  const savedId=safeNum(API_CONFIG.bookmakerId,0);
+  // API-Football resmi bookmaker kataloğunda Bet365 = ID 8.
+  // Bağlantı sırasında /odds/bookmakers çağrısı yapmıyoruz; böylece
+  // gereksiz bir kota kullanımı ve referans endpointindeki olası erişim
+  // sorunları analiz akışını engellemiyor. Odds çağrısı yine yalnızca
+  // bookmaker=8 ile yapılır.
   if(BET365_RESOLVED_ID) return BET365_RESOLVED_ID;
-  try{
-    // 1) Daha önce doğrulanmış/kaydedilmiş ID varsa doğrudan doğrula.
-    if(savedId){
-      try{
-        const check=await apiFetch('/odds/bookmakers',{id:savedId});
-        const rows=Array.isArray(check?.response)?check.response:[];
-        const exact=rows.find(x=>Number(x.id)===savedId && /bet365/i.test(String(x.name||'')));
-        if(exact){
-          BET365_RESOLVED_ID=Number(exact.id);
-          API_CONFIG.bookmakerId=Number(exact.id);
-          return BET365_RESOLVED_ID;
-        }
-      }catch(e){ console.warn('Kayıtlı Bet365 ID doğrulanamadı:',e.message); }
-    }
-
-    // 2) Search parametresine güvenme: API'nin tüm bookmaker listesini al ve tam adı bul.
-    // /odds/bookmakers referans endpointidir ve ID'leri buradan almak resmi yöntemdir.
-    const data=await apiFetch('/odds/bookmakers');
-    const rows=Array.isArray(data?.response)?data.response:[];
-    const exact=rows.find(x=>String(x.name||'').trim().toLowerCase()===BET365_NAME.toLowerCase())
-      || rows.find(x=>/bet365/i.test(String(x.name||'')));
-
-    if(!exact){
-      throw new Error('API-Football bookmaker listesinde Bet365 bulunamadı. API anahtarının odds erişimini ve hesabın bookmaker kapsamını kontrol edin.');
-    }
-
-    BET365_RESOLVED_ID=Number(exact.id);
-    API_CONFIG.bookmakerId=BET365_RESOLVED_ID;
-    saveApiConfig();
-    return BET365_RESOLVED_ID;
-  }catch(e){
-    throw new Error('Bet365 bookmaker ID çözülemedi: '+e.message);
-  }
+  const savedId=safeNum(API_CONFIG.bookmakerId,0);
+  const candidate=savedId===8 ? 8 : 8;
+  BET365_RESOLVED_ID=candidate;
+  API_CONFIG.bookmakerId=candidate;
+  saveApiConfig();
+  return candidate;
 }
 
 function isNearT15(fx, snapshotTime){
