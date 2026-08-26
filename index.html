@@ -1,33 +1,2679 @@
-<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MACANALİZ PRO</title>
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#090c11">
+<title>MACANALİZ PRO — Bet365 Maç Analiz Sistemi</title>
+
 <style>
-:root{--bg:#090c11;--p:#12161f;--p2:#171d28;--l:#273142;--t:#edf2f7;--m:#8e9bad;--g:#19c37d;--r:#ff5364;--a:#f4b942}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px system-ui}header{padding:18px 22px;border-bottom:1px solid var(--l);position:sticky;top:0;background:#0d1118ee;z-index:2}h1{margin:0;font-size:20px}.sub,.small{color:var(--m);font-size:12px}.wrap{max-width:1400px;margin:auto;padding:20px}.grid{display:grid;grid-template-columns:280px 1fr;gap:16px}.panel,.card{background:var(--p);border:1px solid var(--l);border-radius:12px;padding:16px}label{display:block;color:var(--m);font-size:11px;margin:13px 0 6px;text-transform:uppercase}input,select,button{width:100%;padding:10px;border-radius:8px;border:1px solid var(--l);background:var(--p2);color:var(--t)}button{cursor:pointer;font-weight:700}.primary{background:var(--g);color:#06150f}.status{padding:10px;border:1px solid var(--l);border-radius:8px;margin-bottom:10px;line-height:1.4}.ok{color:var(--g)}.bad{color:var(--r)}.warn{color:var(--a)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric{font-size:24px;font-weight:800}.scroll{overflow:auto;margin-top:16px}table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;border-bottom:1px solid var(--l);white-space:nowrap;text-align:left}th{color:var(--m);font-size:11px}.pick{color:var(--g);font-weight:800}.notice{padding:10px;background:#211b0f;border:1px solid #4b3b1c;border-radius:8px;color:#f6d58a;margin-top:12px}@media(max-width:850px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}}
-</style></head><body>
-<header><h1>MACANALİZ PRO</h1><div class="sub">5 Büyük Lig + Süper Lig · Bet365 ONLY · 1X2 · Top 5</div></header>
-<div class="wrap"><div class="grid"><aside class="panel">
-<div id="status" class="status"><span class="warn">● DEMO</span><br>Backend URL girilmedi.</div>
-<label>Backend URL</label><input id="url" placeholder="https://...onrender.com">
-<label>Lig ID'leri</label><input id="leagues" value="39,140,135,78,61,203">
-<label>Gün</label><select id="days"><option>3</option><option selected>7</option><option>14</option></select>
-<label>Sezon (opsiyonel)</label><input id="season" placeholder="Boş bırak: backend kullanır">
-<button class="primary" style="margin-top:14px" onclick="connect()">API'yi Test Et</button>
-<button style="margin-top:8px" onclick="load()">Maçları Getir</button>
-<button style="margin-top:8px" onclick="demo()">Demo Modu</button>
-<div class="notice"><b>Bet365 kuralı:</b> Bet365 1X2 yoksa maç analize alınmaz. Başka bookmaker kullanılmaz.</div>
-<div class="small" style="margin-top:10px">T-15 gerçek zamanlı geçmişi API'nin kendi verisinden geriye dönük garanti edilemez; snapshot toplama gerekir.</div>
-</aside><main>
-<div class="cards"><div class="card"><div class="small">MAÇ</div><div id="count" class="metric">0</div></div><div class="card"><div class="small">BET365</div><div id="bcount" class="metric">0</div></div><div class="card"><div class="small">TOP 5</div><div id="top" class="metric">0</div></div></div>
-<div class="panel scroll"><table><thead><tr><th>Lig</th><th>Maç</th><th>Tarih</th><th>1</th><th>X</th><th>2</th><th>Olasılık</th><th>Seçim</th></tr></thead><tbody id="rows"></tbody></table></div>
-</main></div></div>
+:root{
+    --bg:#090c11;
+    --bg2:#0d1118;
+    --panel:#121821;
+    --panel2:#161d27;
+    --panel3:#1a2130;
+    --border:#273142;
+    --border2:#344155;
+    --text:#edf2f7;
+    --muted:#8995a6;
+    --green:#20c997;
+    --green2:#16a085;
+    --red:#ff5c6c;
+    --yellow:#f3b83f;
+    --blue:#4d9cff;
+    --purple:#9b7cff;
+    --shadow:0 15px 40px rgba(0,0,0,.25);
+}
+
+*{
+    box-sizing:border-box;
+}
+
+html{
+    scroll-behavior:smooth;
+}
+
+body{
+    margin:0;
+    background:
+        radial-gradient(circle at 15% 0%,rgba(77,156,255,.08),transparent 30%),
+        radial-gradient(circle at 90% 10%,rgba(32,201,151,.06),transparent 25%),
+        var(--bg);
+    color:var(--text);
+    font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+
+button,
+input,
+select{
+    font:inherit;
+}
+
+button{
+    cursor:pointer;
+}
+
+a{
+    color:inherit;
+}
+
+.app{
+    min-height:100vh;
+}
+
+/* TOP BAR */
+
+.top-warning{
+    background:#15120b;
+    border-bottom:1px solid #57451d;
+    color:#f3b83f;
+    padding:9px 18px;
+    text-align:center;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.2px;
+}
+
+.header{
+    position:sticky;
+    top:0;
+    z-index:50;
+    background:rgba(9,12,17,.94);
+    backdrop-filter:blur(15px);
+    border-bottom:1px solid var(--border);
+}
+
+.header-inner{
+    max-width:1500px;
+    margin:auto;
+    min-height:72px;
+    padding:0 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+}
+
+.brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-width:220px;
+}
+
+.logo{
+    width:40px;
+    height:40px;
+    border-radius:12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(135deg,#20c997,#13795b);
+    color:#03120e;
+    font-weight:900;
+    box-shadow:0 8px 25px rgba(32,201,151,.25);
+}
+
+.brand h1{
+    margin:0;
+    font-size:17px;
+    letter-spacing:.3px;
+}
+
+.brand small{
+    display:block;
+    color:var(--muted);
+    margin-top:3px;
+    font-size:11px;
+}
+
+.header-status{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    gap:8px;
+}
+
+.badge{
+    border:1px solid var(--border);
+    background:var(--panel);
+    border-radius:20px;
+    padding:8px 11px;
+    color:var(--muted);
+    font-size:11px;
+    white-space:nowrap;
+}
+
+.badge strong{
+    color:var(--text);
+}
+
+.badge.live strong{
+    color:var(--green);
+}
+
+.badge.demo strong{
+    color:var(--yellow);
+}
+
+.btn{
+    border:1px solid var(--border2);
+    background:var(--panel2);
+    color:var(--text);
+    border-radius:9px;
+    padding:10px 14px;
+    font-weight:700;
+    font-size:12px;
+    transition:.2s;
+}
+
+.btn:hover{
+    transform:translateY(-1px);
+    border-color:#52627a;
+}
+
+.btn.primary{
+    background:var(--green);
+    color:#03130f;
+    border-color:var(--green);
+}
+
+.btn.primary:hover{
+    background:#29d8a5;
+}
+
+.btn.blue{
+    background:#1d5fb8;
+    border-color:#2675dc;
+}
+
+.btn.danger{
+    color:#ff8290;
+}
+
+/* LAYOUT */
+
+.container{
+    max-width:1500px;
+    margin:auto;
+    padding:22px 20px 60px;
+}
+
+.grid{
+    display:grid;
+    grid-template-columns:300px minmax(0,1fr);
+    gap:18px;
+    align-items:start;
+}
+
+.sidebar{
+    position:sticky;
+    top:92px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+}
+
+.panel{
+    background:linear-gradient(180deg,var(--panel),#10161f);
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+}
+
+.panel-head{
+    padding:14px 15px;
+    border-bottom:1px solid var(--border);
+    font-size:13px;
+    font-weight:800;
+}
+
+.panel-body{
+    padding:14px;
+}
+
+.field{
+    margin-bottom:13px;
+}
+
+.field:last-child{
+    margin-bottom:0;
+}
+
+.field label{
+    display:block;
+    margin-bottom:6px;
+    color:var(--muted);
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+}
+
+input,
+select{
+    width:100%;
+    border:1px solid var(--border);
+    background:#0d131c;
+    color:var(--text);
+    border-radius:8px;
+    padding:10px 11px;
+    outline:none;
+}
+
+input:focus,
+select:focus{
+    border-color:var(--blue);
+    box-shadow:0 0 0 2px rgba(77,156,255,.1);
+}
+
+.action-stack{
+    display:grid;
+    gap:8px;
+    margin-top:14px;
+}
+
+.status-box{
+    border:1px solid var(--border);
+    background:#0d131c;
+    border-radius:9px;
+    padding:11px;
+    font-size:11px;
+    line-height:1.45;
+    color:var(--muted);
+}
+
+.status-box.success{
+    border-color:rgba(32,201,151,.35);
+}
+
+.status-box.error{
+    border-color:rgba(255,92,108,.35);
+    color:#ff9ba5;
+}
+
+.status-dot{
+    display:inline-block;
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    margin-right:6px;
+    background:var(--yellow);
+}
+
+.status-dot.ok{
+    background:var(--green);
+    box-shadow:0 0 10px rgba(32,201,151,.6);
+}
+
+.status-dot.bad{
+    background:var(--red);
+}
+
+/* MAIN */
+
+.main{
+    min-width:0;
+}
+
+.section{
+    margin-bottom:18px;
+}
+
+.section-title{
+    display:flex;
+    justify-content:space-between;
+    align-items:end;
+    gap:15px;
+    margin-bottom:12px;
+}
+
+.section-title h2{
+    margin:0;
+    font-size:17px;
+}
+
+.section-title p{
+    margin:5px 0 0;
+    color:var(--muted);
+    font-size:11px;
+}
+
+.filters{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+}
+
+.filter{
+    padding:9px 13px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--panel);
+    color:var(--muted);
+    font-size:11px;
+    font-weight:800;
+}
+
+.filter.active{
+    color:#fff;
+    border-color:var(--blue);
+    background:rgba(77,156,255,.12);
+}
+
+/* TOP 5 */
+
+.top5{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:10px;
+    overflow-x:auto;
+}
+
+.match-card{
+    min-width:210px;
+    background:linear-gradient(180deg,#171f2c,#111721);
+    border:1px solid var(--border);
+    border-radius:14px;
+    overflow:hidden;
+    position:relative;
+}
+
+.match-card:hover{
+    border-color:#485872;
+}
+
+.card-top{
+    padding:12px 13px 10px;
+}
+
+.rank{
+    color:var(--yellow);
+    font-size:11px;
+    font-weight:900;
+}
+
+.league-name{
+    color:#69768a;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    font-size:9px;
+    text-align:center;
+    margin-top:-2px;
+}
+
+.teams{
+    text-align:center;
+    margin-top:8px;
+}
+
+.team{
+    font-size:13px;
+    font-weight:800;
+}
+
+.vs{
+    color:#657186;
+    font-size:9px;
+    margin:4px 0;
+}
+
+.card-line{
+    border-top:1px dashed #344052;
+    margin:0 13px;
+}
+
+.card-data{
+    padding:11px 13px 13px;
+}
+
+.prediction{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+}
+
+.prediction strong{
+    color:var(--green);
+    font-size:15px;
+}
+
+.percent{
+    font-weight:900;
+    color:#fff;
+}
+
+.odd-row{
+    color:#7d8a9d;
+    font-size:10px;
+    margin-top:8px;
+}
+
+.progress{
+    height:5px;
+    background:#252e3c;
+    border-radius:10px;
+    overflow:hidden;
+    margin-top:10px;
+}
+
+.progress span{
+    display:block;
+    height:100%;
+    background:linear-gradient(90deg,var(--yellow),var(--green));
+}
+
+.confidence{
+    margin-top:6px;
+    display:flex;
+    justify-content:space-between;
+    font-size:9px;
+    color:var(--muted);
+}
+
+/* FEATURE BOXES */
+
+.feature-grid{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:10px;
+}
+
+.feature{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:13px;
+}
+
+.feature .label{
+    font-size:9px;
+    color:#748196;
+    text-transform:uppercase;
+    letter-spacing:.8px;
+}
+
+.feature .match{
+    margin-top:8px;
+    font-size:12px;
+    font-weight:800;
+}
+
+.feature .value{
+    margin-top:7px;
+    font-size:14px;
+    font-weight:900;
+    color:var(--green);
+}
+
+.feature .sub{
+    margin-top:5px;
+    color:var(--muted);
+    font-size:10px;
+}
+
+/* TABLE */
+
+.table-wrap{
+    overflow:auto;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:var(--panel);
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    min-width:850px;
+}
+
+th{
+    background:#101721;
+    color:#7f8ca0;
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:.7px;
+    text-align:left;
+    padding:11px;
+    border-bottom:1px solid var(--border);
+}
+
+td{
+    padding:11px;
+    border-bottom:1px solid rgba(39,49,66,.65);
+    font-size:11px;
+}
+
+tr:last-child td{
+    border-bottom:0;
+}
+
+tr:hover td{
+    background:rgba(77,156,255,.025);
+}
+
+.green{
+    color:var(--green);
+    font-weight:800;
+}
+
+.yellow{
+    color:var(--yellow);
+    font-weight:800;
+}
+
+.red{
+    color:var(--red);
+    font-weight:800;
+}
+
+/* ODDS */
+
+.odds-grid{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:10px;
+}
+
+.odd-box{
+    background:#0d131c;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:12px;
+}
+
+.odd-title{
+    color:var(--muted);
+    font-size:9px;
+    text-transform:uppercase;
+}
+
+.odd-value{
+    margin-top:5px;
+    font-size:18px;
+    font-weight:900;
+}
+
+.movement{
+    margin-top:5px;
+    font-size:10px;
+}
+
+/* EMPTY */
+
+.empty{
+    padding:35px 15px;
+    text-align:center;
+    color:var(--muted);
+    border:1px dashed var(--border2);
+    border-radius:12px;
+}
+
+.empty strong{
+    display:block;
+    color:var(--text);
+    margin-bottom:6px;
+}
+
+/* DETAIL */
+
+.detail{
+    display:none;
+}
+
+.detail.open{
+    display:block;
+}
+
+.detail-header{
+    padding:15px;
+    display:flex;
+    justify-content:space-between;
+    gap:15px;
+    border-bottom:1px solid var(--border);
+}
+
+.detail-title{
+    font-size:16px;
+    font-weight:900;
+}
+
+.detail-sub{
+    color:var(--muted);
+    font-size:10px;
+    margin-top:4px;
+}
+
+.detail-body{
+    padding:15px;
+}
+
+.detail-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:10px;
+}
+
+/* RESPONSIVE */
+
+@media(max-width:1100px){
+    .grid{
+        grid-template-columns:1fr;
+    }
+
+    .sidebar{
+        position:static;
+    }
+
+    .top5{
+        grid-template-columns:repeat(5,210px);
+    }
+}
+
+@media(max-width:800px){
+    .header-inner{
+        align-items:flex-start;
+        padding-top:12px;
+        padding-bottom:12px;
+        flex-direction:column;
+    }
+
+    .header-status{
+        justify-content:flex-start;
+    }
+
+    .feature-grid,
+    .odds-grid,
+    .detail-grid{
+        grid-template-columns:1fr;
+    }
+
+    .container{
+        padding:14px 10px 40px;
+    }
+}
+</style>
+</head>
+
+<body>
+<div class="app">
+
+    <div class="top-warning">
+        ⚠ BET365 ODAKLI VERİ MODU — Gerçek API kullanılır. Bet365 verisi bulunmayan maçlar öneri sıralamasına alınmaz.
+        Tahminler olasılık modelidir; kesin sonuç veya kazanç garantisi değildir.
+    </div>
+
+    <header class="header">
+        <div class="header-inner">
+
+            <div class="brand">
+                <div class="logo">MA</div>
+                <div>
+                    <h1>MACANALİZ PRO</h1>
+                    <small id="clock">Bağlanıyor...</small>
+                </div>
+            </div>
+
+            <div class="header-status">
+                <div class="badge" id="apiBadge">
+                    ● API: <strong>DEMO</strong>
+                </div>
+
+                <div class="badge" id="oddsBadge">
+                    ● Oran: <strong>Bet365</strong>
+                </div>
+
+                <button class="btn primary" onclick="loadMatches()">
+                    ↻ Verileri Güncelle
+                </button>
+            </div>
+
+        </div>
+    </header>
+
+    <div class="container">
+
+        <div class="grid">
+
+            <!-- SIDEBAR -->
+
+            <aside class="sidebar">
+
+                <div class="panel">
+
+                    <div class="panel-head">
+                        Gerçek API Bağlantısı
+                    </div>
+
+                    <div class="panel-body">
+
+                        <div class="field">
+                            <label>Backend URL</label>
+
+                            <input
+                                id="backendUrl"
+                                type="url"
+                                value="https://lig-6ycn.onrender.com"
+                                placeholder="https://ornek.onrender.com"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label>Lig ID'leri</label>
+
+                            <input
+                                id="leagueIds"
+                                value="39,140,135,78,61,203"
+                                placeholder="39,140,135,78,61,203"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label>Gün Aralığı</label>
+
+                            <select id="days">
+                                <option value="1">Bugün</option>
+                                <option value="3">3 Gün</option>
+                                <option value="7" selected>7 Gün</option>
+                                <option value="14">14 Gün</option>
+                            </select>
+                        </div>
+
+                        <div class="field">
+                            <label>Sezon</label>
+
+                            <input
+                                id="season"
+                                value="2026"
+                                placeholder="Örn. 2026"
+                            >
+                        </div>
+
+                        <div class="field">
+                            <label>Oran Sağlayıcı</label>
+
+                            <input
+                                value="Bet365"
+                                disabled
+                            >
+                        </div>
+
+                        <div class="action-stack">
+
+                            <button
+                                class="btn primary"
+                                onclick="testBackend()"
+                            >
+                                API'yi Test Et
+                            </button>
+
+                            <button
+                                class="btn blue"
+                                onclick="loadMatches()"
+                            >
+                                Maçları Getir
+                            </button>
+
+                            <button
+                                class="btn"
+                                onclick="loadDemo()"
+                            >
+                                Demo Modu
+                            </button>
+
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="panel">
+
+                    <div class="panel-head">
+                        Bağlantı Durumu
+                    </div>
+
+                    <div class="panel-body">
+
+                        <div
+                            id="statusBox"
+                            class="status-box"
+                        >
+                            <span class="status-dot"></span>
+                            API bağlantısı henüz test edilmedi.
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="panel">
+
+                    <div class="panel-head">
+                        Analiz Kuralları
+                    </div>
+
+                    <div class="panel-body">
+
+                        <div class="status-box">
+                            <b>Bet365</b> ana bookmaker olarak kullanılır.
+                            <br><br>
+                            Açılış oranı ve T-15 oranı varsa oran hareketi hesaplanır.
+                            <br><br>
+                            Geçmiş snapshot verisi yoksa sistem geçmiş oran başarısını uydurmaz.
+                            <br><br>
+                            Top 5 sıralaması model olasılığı + oran hareketi + tarihsel destek + veri kalitesine göre yapılır.
+                        </div>
+
+                    </div>
+                </div>
+
+            </aside>
+
+            <!-- MAIN -->
+
+            <main class="main">
+
+                <!-- FILTERS -->
+
+                <section class="section">
+
+                    <div class="section-title">
+                        <div>
+                            <h2>Ligler</h2>
+                            <p>5 Büyük Lig + Süper Lig</p>
+                        </div>
+                    </div>
+
+                    <div class="filters">
+
+                        <button
+                            class="filter active"
+                            data-league="all"
+                            onclick="filterLeague('all',this)"
+                        >
+                            Tümü
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="39"
+                            onclick="filterLeague('39',this)"
+                        >
+                            Premier Lig
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="140"
+                            onclick="filterLeague('140',this)"
+                        >
+                            La Liga
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="135"
+                            onclick="filterLeague('135',this)"
+                        >
+                            Serie A
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="78"
+                            onclick="filterLeague('78',this)"
+                        >
+                            Bundesliga
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="61"
+                            onclick="filterLeague('61',this)"
+                        >
+                            Ligue 1
+                        </button>
+
+                        <button
+                            class="filter"
+                            data-league="203"
+                            onclick="filterLeague('203',this)"
+                        >
+                            Süper Lig
+                        </button>
+
+                    </div>
+
+                </section>
+
+                <!-- TOP 5 -->
+
+                <section class="section">
+
+                    <div class="section-title">
+
+                        <div>
+                            <h2>🏆 Bugünün Akıllı İlk 5</h2>
+
+                            <p>
+                                En yüksek olasılığın yanında oran hareketi,
+                                tarihsel destek ve veri kalitesi dikkate alınır.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div
+                        id="top5"
+                        class="top5"
+                    >
+
+                        <div class="empty">
+                            <strong>Henüz maç verisi yok</strong>
+                            API'yi test edip "Maçları Getir" butonuna basın.
+                        </div>
+
+                    </div>
+
+                </section>
+
+                <!-- FEATURE ANALYSIS -->
+
+                <section class="section">
+
+                    <div class="section-title">
+
+                        <div>
+                            <h2>📌 Öne Çıkan Analizler</h2>
+
+                            <p>
+                                Her kategori için en güçlü sinyaller.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div
+                        id="features"
+                        class="feature-grid"
+                    >
+
+                        <div class="feature">
+                            <div class="label">En yüksek MS olasılığı</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">API bağlantısı gerekli</div>
+                        </div>
+
+                        <div class="feature">
+                            <div class="label">En yüksek İY olasılığı</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">API bağlantısı gerekli</div>
+                        </div>
+
+                        <div class="feature">
+                            <div class="label">En güçlü KG</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">API bağlantısı gerekli</div>
+                        </div>
+
+                        <div class="feature">
+                            <div class="label">En güçlü 2,5 Üst/Alt</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">API bağlantısı gerekli</div>
+                        </div>
+
+                        <div class="feature">
+                            <div class="label">En güçlü oran hareketi</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">Bet365 snapshot gerekli</div>
+                        </div>
+
+                        <div class="feature">
+                            <div class="label">En yüksek model/piyasa farkı</div>
+                            <div class="match">Veri bekleniyor</div>
+                            <div class="value">—</div>
+                            <div class="sub">Model hesabı gerekli</div>
+                        </div>
+
+                    </div>
+
+                </section>
+
+                <!-- MATCH TABLE -->
+
+                <section class="section">
+
+                    <div class="section-title">
+
+                        <div>
+                            <h2>⚽ Maçlar</h2>
+
+                            <p>
+                                Bet365 verisi bulunmayan maçlar işaretlenir.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="table-wrap">
+
+                        <table>
+
+                            <thead>
+
+                                <tr>
+                                    <th>Lig</th>
+                                    <th>Maç</th>
+                                    <th>Tarih</th>
+                                    <th>MS</th>
+                                    <th>İY</th>
+                                    <th>Bet365 1</th>
+                                    <th>Bet365 X</th>
+                                    <th>Bet365 2</th>
+                                    <th>Model</th>
+                                    <th>Güven</th>
+                                </tr>
+
+                            </thead>
+
+                            <tbody id="matchRows">
+
+                                <tr>
+                                    <td colspan="10">
+                                        <div class="empty">
+                                            <strong>Maç verisi bulunmuyor</strong>
+                                            "Maçları Getir" butonuna basın.
+                                        </div>
+                                    </td>
+                                </tr>
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </section>
+
+                <!-- ODDS -->
+
+                <section class="section">
+
+                    <div class="section-title">
+
+                        <div>
+                            <h2>📊 Bet365 Oran Analizi</h2>
+
+                            <p>
+                                Açılış → güncel → T-15 hareketi.
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div
+                        id="oddsArea"
+                        class="odds-grid"
+                    >
+
+                        <div class="odd-box">
+                            <div class="odd-title">Açılış MS 1</div>
+                            <div class="odd-value">—</div>
+                            <div class="movement">Veri yok</div>
+                        </div>
+
+                        <div class="odd-box">
+                            <div class="odd-title">Güncel MS 1</div>
+                            <div class="odd-value">—</div>
+                            <div class="movement">Veri yok</div>
+                        </div>
+
+                        <div class="odd-box">
+                            <div class="odd-title">T-15 MS 1</div>
+                            <div class="odd-value">—</div>
+                            <div class="movement">Snapshot gerekli</div>
+                        </div>
+
+                    </div>
+
+                </section>
+
+                <!-- DETAIL -->
+
+                <section
+                    id="detail"
+                    class="section panel detail"
+                >
+
+                    <div class="detail-header">
+
+                        <div>
+                            <div
+                                id="detailTitle"
+                                class="detail-title"
+                            >
+                                Maç Detayı
+                            </div>
+
+                            <div
+                                id="detailSub"
+                                class="detail-sub"
+                            >
+                                —
+                            </div>
+                        </div>
+
+                        <button
+                            class="btn"
+                            onclick="closeDetail()"
+                        >
+                            Kapat
+                        </button>
+
+                    </div>
+
+                    <div
+                        id="detailBody"
+                        class="detail-body"
+                    ></div>
+
+                </section>
+
+            </main>
+
+        </div>
+
+    </div>
+
+</div>
+
 <script>
-const S={items:[]};const $=x=>document.getElementById(x);const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function set(t,m){$('status').innerHTML='<span class="'+t+'">● '+(t==='ok'?'CANLI API':t==='bad'?'HATA':'BİLGİ')+'</span><br>'+esc(m)}
-function base(){return $('url').value.trim().replace(/\/+$/,'')}
-async function get(p){if(!base())throw Error('Backend URL girilmedi.');let r=await fetch(base()+p);let d;try{d=await r.json()}catch{throw Error('Backend JSON döndürmedi. HTTP '+r.status)}if(!r.ok)throw Error(d.detail||'HTTP '+r.status);return d}
-async function connect(){try{await get('/api/health');let b=await get('/api/bet365');set('ok','Backend çalışıyor. '+(b.bookmaker?.name||'Bet365')+' ID: '+b.bookmaker?.id)}catch(e){set('bad',e.message)}}
-async function load(){try{let q='/api/fixtures?ids='+encodeURIComponent($('leagues').value)+'&days='+$('days').value;let s=$('season').value.trim();if(s)q+='&season='+encodeURIComponent(s);let d=await get(q),a=[];for(const f of d.fixtures||[]){try{let o=await get('/api/odds?fixture='+f.fixture.id);if(o.available&&o.odds)a.push({fixture:f,odds:o.odds})}catch{}}S.items=a;set('ok',a.length+' maçta Bet365 1X2 bulundu.');render()}catch(e){set('bad',e.message)}}
-function score(x){let o=x.odds,p=[1/o.home,1/o.draw,1/o.away],z=p[0]+p[1]+p[2];return Math.max(...p)/z*100}
-function pick(x){let o=x.odds,a=[['1',o.home],['X',o.draw],['2',o.away]];a.sort((x,y)=>x[1]-y[1]);return a[0][0]}
-function render(){let a=[...S.items].sort((x,y)=>score(y)-score(x));$('count').textContent=a.length;$('bcount').textContent=a.length;$('top').textContent=Math.min(5,a.length);$('rows').innerHTML=a.map(x=>{let f=x.fixture,o=x.odds;return '<tr><td>'+esc(f.league?.name)+'</td><td><b>'+esc(f.teams?.home?.name)+'</b> — '+esc(f.teams?.away?.name)+'</td><td>'+new Date(f.fixture.date).toLocaleString('tr-TR')+'</td><td>'+Number(o.home).toFixed(2)+'</td><td>'+Number(o.draw).toFixed(2)+'</td><td>'+Number(o.away).toFixed(2)+'</td><td>'+score(x).toFixed(1)+'%</td><td class="pick">'+pick(x)+'</td></tr>'}).join('')||'<tr><td colspan="8" class="small">Bet365 verili maç yok.</td></tr>'}
-function demo(){S.items=[{fixture:{fixture:{id:1,date:new Date(Date.now()+86400000).toISOString()},league:{name:'Premier League'},teams:{home:{name:'Demo FC'},away:{name:'Demo United'}}},odds:{home:1.72,draw:3.75,away:4.8}},{fixture:{fixture:{id:2,date:new Date(Date.now()+2*86400000).toISOString()},league:{name:'Süper Lig'},teams:{home:{name:'Örnekspor'},away:{name:'Demo FK'}}},odds:{home:2.05,draw:3.3,away:3.45}}];set('warn','Demo veri gösteriliyor. Canlı veri için backend URL gir.');render()}demo()
-</script></body></html>
+"use strict";
+
+/*
+    MACANALİZ PRO
+    Frontend-only single HTML application.
+
+    Backend:
+    https://lig-6ycn.onrender.com
+
+    Expected backend endpoints:
+      GET /api/health
+      GET /api/bet365
+      GET /api/fixtures?ids=39,140,...&days=7&season=2026
+
+    API key MUST remain on Render.
+*/
+
+const DEFAULT_BACKEND = "https://lig-6ycn.onrender.com";
+
+const state = {
+    matches: [],
+    filtered: [],
+    league: "all",
+    mode: "demo",
+    backend: DEFAULT_BACKEND
+};
+
+const leagueNames = {
+    "39": "Premier Lig",
+    "140": "La Liga",
+    "135": "Serie A",
+    "78": "Bundesliga",
+    "61": "Ligue 1",
+    "203": "Süper Lig"
+};
+
+function $(id){
+    return document.getElementById(id);
+}
+
+function escapeHtml(value){
+    return String(value ?? "")
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#039;");
+}
+
+function cleanUrl(){
+    let value = $("backendUrl").value.trim();
+
+    if(!value){
+        value = DEFAULT_BACKEND;
+        $("backendUrl").value = value;
+    }
+
+    return value.replace(/\/+$/,"");
+}
+
+function setStatus(message,type="info"){
+    const box = $("statusBox");
+
+    box.className = "status-box";
+
+    let dot = "status-dot";
+
+    if(type === "success"){
+        box.classList.add("success");
+        dot += " ok";
+    }
+
+    if(type === "error"){
+        box.classList.add("error");
+        dot += " bad";
+    }
+
+    box.innerHTML =
+        `<span class="${dot}"></span>${escapeHtml(message)}`;
+}
+
+async function apiFetch(path,options={}){
+    const base = cleanUrl();
+
+    const response = await fetch(
+        base + path,
+        {
+            ...options,
+            headers:{
+                "Accept":"application/json",
+                ...(options.headers || {})
+            }
+        }
+    );
+
+    const text = await response.text();
+
+    let data;
+
+    try{
+        data = JSON.parse(text);
+    }catch{
+        data = {
+            raw:text
+        };
+    }
+
+    if(!response.ok){
+        const detail =
+            data?.detail ||
+            data?.message ||
+            data?.error ||
+            `HTTP ${response.status}`;
+
+        throw new Error(detail);
+    }
+
+    return data;
+}
+
+async function testBackend(){
+    setStatus("Backend bağlantısı test ediliyor...");
+
+    try{
+
+        const data = await apiFetch("/api/health");
+
+        state.mode = "live";
+
+        $("apiBadge").innerHTML =
+            `● API: <strong style="color:var(--green)">CANLI</strong>`;
+
+        setStatus(
+            "Backend çalışıyor. Gerçek API bağlantısı aktif.",
+            "success"
+        );
+
+        console.log("Health:",data);
+
+    }catch(error){
+
+        state.mode = "demo";
+
+        $("apiBadge").innerHTML =
+            `● API: <strong style="color:var(--yellow)">DEMO</strong>`;
+
+        setStatus(
+            "Backend bağlantısı başarısız: " + error.message,
+            "error"
+        );
+    }
+}
+
+async function loadMatches(){
+
+    setStatus("Maçlar ve Bet365 verileri yükleniyor...");
+
+    const ids = $("leagueIds").value.trim();
+    const days = $("days").value;
+    const season = $("season").value.trim();
+
+    try{
+
+        const query =
+            `?ids=${encodeURIComponent(ids)}` +
+            `&days=${encodeURIComponent(days)}` +
+            (season
+                ? `&season=${encodeURIComponent(season)}`
+                : "");
+
+        const data = await apiFetch(
+            "/api/fixtures" + query
+        );
+
+        const raw =
+            data?.matches ??
+            data?.fixtures ??
+            data?.data ??
+            [];
+
+        state.matches = normalizeMatches(raw);
+        state.mode = "live";
+
+        $("apiBadge").innerHTML =
+            `● API: <strong style="color:var(--green)">CANLI</strong>`;
+
+        render();
+
+        setStatus(
+            `${state.matches.length} maç alındı.`,
+            "success"
+        );
+
+    }catch(error){
+
+        setStatus(
+            "Maç verisi alınamadı: " + error.message,
+            "error"
+        );
+
+        console.error(error);
+    }
+}
+
+function normalizeMatches(items){
+
+    if(!Array.isArray(items)){
+        return [];
+    }
+
+    return items.map((item,index)=>{
+
+        const fixture =
+            item.fixture ||
+            item.game ||
+            item;
+
+        const teams =
+            item.teams ||
+            fixture.teams ||
+            {};
+
+        const home =
+            teams.home?.name ||
+            item.home ||
+            item.home_team ||
+            "Ev Sahibi";
+
+        const away =
+            teams.away?.name ||
+            item.away ||
+            item.away_team ||
+            "Deplasman";
+
+        const league =
+            item.league ||
+            fixture.league ||
+            {};
+
+        const date =
+            fixture.date ||
+            item.date ||
+            item.start ||
+            "";
+
+        const odds =
+            item.odds ||
+            item.bet365 ||
+            item.bet365_odds ||
+            {};
+
+        const probability =
+            item.probabilities ||
+            item.probability ||
+            item.prediction ||
+            {};
+
+        return {
+            id:
+                fixture.id ||
+                item.id ||
+                index + 1,
+
+            home,
+            away,
+
+            leagueId:String(
+                league.id ||
+                item.league_id ||
+                ""
+            ),
+
+            leagueName:
+                league.name ||
+                item.league_name ||
+                leagueNames[String(league.id)] ||
+                "Lig",
+
+            date,
+
+            odds,
+
+            probability,
+
+            confidence:
+                Number(
+                    item.confidence ??
+                    probability.confidence ??
+                    0
+                ),
+
+            bet365:
+                item.bet365 ||
+                item.bookmaker ||
+                odds,
+
+            historical:
+                item.historical ||
+                item.history ||
+                {},
+
+            snapshots:
+                item.snapshots ||
+                item.odds_history ||
+                []
+        };
+
+    });
+}
+
+function parseNumber(value){
+
+    if(value === null || value === undefined){
+        return null;
+    }
+
+    const n = Number(
+        String(value)
+            .replace("%","")
+            .replace(",",".")
+            .trim()
+    );
+
+    return Number.isFinite(n) ? n : null;
+}
+
+function getOdd(match,key){
+
+    const odds =
+        match.bet365 ||
+        match.odds ||
+        {};
+
+    const candidates = [
+        odds[key],
+        odds[key?.toLowerCase()],
+        odds[`ms_${key}`],
+        odds[`1x2_${key}`]
+    ];
+
+    for(const value of candidates){
+
+        if(value !== undefined && value !== null){
+
+            if(typeof value === "object"){
+                const nested =
+                    value.price ??
+                    value.odd ??
+                    value.value;
+
+                const n = parseNumber(nested);
+
+                if(n !== null){
+                    return n;
+                }
+            }
+
+            const n = parseNumber(value);
+
+            if(n !== null){
+                return n;
+            }
+        }
+    }
+
+    return null;
+}
+
+function getProbability(match){
+
+    const p = match.probability || {};
+
+    const candidates = [
+        p.ms1,
+        p.home,
+        p["1"],
+        p.home_win,
+        p.win
+    ];
+
+    for(const value of candidates){
+
+        const n = parseNumber(value);
+
+        if(n !== null){
+            return n <= 1 ? n * 100 : n;
+        }
+    }
+
+    return null;
+}
+
+function confidenceScore(match){
+
+    const p = getProbability(match);
+
+    if(p === null){
+        return 0;
+    }
+
+    let score = p;
+
+    const history = match.historical || {};
+
+    const historicalRate =
+        parseNumber(
+            history.success_rate ??
+            history.rate ??
+            history.hit_rate
+        );
+
+    if(historicalRate !== null){
+        score = score * .7 + historicalRate * .3;
+    }
+
+    return Math.max(
+        0,
+        Math.min(100,score)
+    );
+}
+
+function getPrediction(match){
+
+    const p = match.probability || {};
+
+    if(p.ms1 !== undefined){
+        return "MS 1";
+    }
+
+    if(p.home !== undefined){
+        return "MS 1";
+    }
+
+    if(p.msX !== undefined){
+        return "MS X";
+    }
+
+    if(p.ms2 !== undefined){
+        return "MS 2";
+    }
+
+    const odd1 = getOdd(match,"1");
+    const odd2 = getOdd(match,"2");
+
+    if(odd1 !== null && odd2 !== null){
+        return odd1 < odd2 ? "MS 1" : "MS 2";
+    }
+
+    return "—";
+}
+
+function getMovement(match){
+
+    const history =
+        match.historical ||
+        {};
+
+    const opening =
+        parseNumber(
+            history.opening ??
+            history.open ??
+            history.opening_odd
+        );
+
+    const current =
+        parseNumber(
+            history.current ??
+            history.latest ??
+            history.current_odd
+        );
+
+    if(
+        opening === null ||
+        current === null ||
+        opening === 0
+    ){
+        return null;
+    }
+
+    return ((current-opening)/opening)*100;
+}
+
+function confidenceLabel(score){
+
+    if(score >= 75){
+        return "ÇOK GÜÇLÜ";
+    }
+
+    if(score >= 65){
+        return "GÜÇLÜ";
+    }
+
+    if(score >= 55){
+        return "ORTA";
+    }
+
+    return "DÜŞÜK";
+}
+
+function applyFilter(){
+
+    if(state.league === "all"){
+        state.filtered = [...state.matches];
+        return;
+    }
+
+    state.filtered =
+        state.matches.filter(
+            match =>
+                String(match.leagueId) ===
+                String(state.league)
+        );
+}
+
+function filterLeague(id,button){
+
+    state.league = id;
+
+    document
+        .querySelectorAll(".filter")
+        .forEach(el =>
+            el.classList.remove("active")
+        );
+
+    button.classList.add("active");
+
+    render();
+}
+
+function render(){
+
+    applyFilter();
+
+    const sorted =
+        [...state.filtered]
+            .sort(
+                (a,b) =>
+                    confidenceScore(b) -
+                    confidenceScore(a)
+            );
+
+    renderTop5(sorted.slice(0,5));
+    renderFeatures(sorted);
+    renderTable(sorted);
+    renderOdds(sorted[0]);
+}
+
+function renderTop5(matches){
+
+    const container = $("top5");
+
+    if(!matches.length){
+
+        container.innerHTML = `
+            <div class="empty">
+                <strong>Maç bulunamadı</strong>
+                Seçilen filtrelerde veri yok.
+            </div>
+        `;
+
+        return;
+    }
+
+    container.innerHTML =
+        matches.map((match,index)=>{
+
+            const score =
+                confidenceScore(match);
+
+            const prediction =
+                getPrediction(match);
+
+            const odd =
+                getOdd(
+                    match,
+                    prediction === "MS 2" ? "2" :
+                    prediction === "MS X" ? "X" : "1"
+                );
+
+            const movement =
+                getMovement(match);
+
+            return `
+                <article
+                    class="match-card"
+                    onclick="openDetail(${index})"
+                    data-id="${escapeHtml(match.id)}"
+                >
+
+                    <div class="card-top">
+
+                        <div class="rank">
+                            #${index+1}
+                        </div>
+
+                        <div class="league-name">
+                            ${escapeHtml(match.leagueName)}
+                        </div>
+
+                        <div class="teams">
+
+                            <div class="team">
+                                ${escapeHtml(match.home)}
+                            </div>
+
+                            <div class="vs">
+                                VS
+                            </div>
+
+                            <div class="team">
+                                ${escapeHtml(match.away)}
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <div class="card-line"></div>
+
+                    <div class="card-data">
+
+                        <div class="prediction">
+
+                            <strong>
+                                ${escapeHtml(prediction)}
+                            </strong>
+
+                            <span class="percent">
+                                ${score
+                                    ? "%" + Math.round(score)
+                                    : "—"}
+                            </span>
+
+                        </div>
+
+                        <div class="odd-row">
+
+                            Bet365:
+                            ${odd !== null
+                                ? odd.toFixed(2)
+                                : "veri yok"}
+
+                            ${
+                                movement !== null
+                                ? ` · ${movement > 0 ? "+" : ""}${movement.toFixed(1)}%`
+                                : ""
+                            }
+
+                        </div>
+
+                        <div class="progress">
+                            <span
+                                style="width:${Math.max(3,Math.min(100,score))}%"
+                            ></span>
+                        </div>
+
+                        <div class="confidence">
+
+                            <span>
+                                GÜVEN
+                            </span>
+
+                            <span>
+                                ${confidenceLabel(score)}
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                </article>
+            `;
+
+        }).join("");
+}
+
+function renderFeatures(matches){
+
+    const featureBoxes =
+        document.querySelectorAll(".feature");
+
+    if(!matches.length){
+        return;
+    }
+
+    const best =
+        matches
+            .slice()
+            .sort(
+                (a,b)=>
+                    confidenceScore(b) -
+                    confidenceScore(a)
+            )[0];
+
+    const bestMovement =
+        matches
+            .map(m=>({
+                match:m,
+                movement:getMovement(m)
+            }))
+            .filter(x=>x.movement !== null)
+            .sort(
+                (a,b)=>
+                    Math.abs(b.movement) -
+                    Math.abs(a.movement)
+            )[0];
+
+    const bestDiff =
+        matches
+            .map(m=>{
+
+                const probability =
+                    getProbability(m);
+
+                const odd =
+                    getOdd(m,"1");
+
+                if(
+                    probability === null ||
+                    odd === null
+                ){
+                    return {
+                        match:m,
+                        diff:null
+                    };
+                }
+
+                const market =
+                    (1/odd)*100;
+
+                return {
+                    match:m,
+                    diff:probability-market
+                };
+
+            })
+            .filter(x=>x.diff !== null)
+            .sort(
+                (a,b)=>
+                    Math.abs(b.diff) -
+                    Math.abs(a.diff)
+            )[0];
+
+    const values = [
+
+        best
+            ? {
+                match:`${best.home} - ${best.away}`,
+                value:`${getPrediction(best)} · %${Math.round(confidenceScore(best))}`,
+                sub:best.leagueName
+            }
+            : null,
+
+        best
+            ? {
+                match:`${best.home} - ${best.away}`,
+                value:`${getPrediction(best)}`,
+                sub:"İlk yarı modeli backend verisine bağlı"
+            }
+            : null,
+
+        best
+            ? {
+                match:`${best.home} - ${best.away}`,
+                value:"Backend verisine bağlı",
+                sub:"KG modeli"
+            }
+            : null,
+
+        best
+            ? {
+                match:`${best.home} - ${best.away}`,
+                value:"Backend verisine bağlı",
+                sub:"2,5 Üst/Alt modeli"
+            }
+            : null,
+
+        bestMovement
+            ? {
+                match:`${bestMovement.match.home} - ${bestMovement.match.away}`,
+                value:`${bestMovement.movement > 0 ? "+" : ""}${bestMovement.movement.toFixed(1)}%`,
+                sub:"Açılış → güncel"
+            }
+            : {
+                match:"Snapshot verisi yok",
+                value:"—",
+                sub:"Bet365 T-15 kaydı gerekli"
+            },
+
+        bestDiff
+            ? {
+                match:`${bestDiff.match.home} - ${bestDiff.match.away}`,
+                value:`${bestDiff.diff > 0 ? "+" : ""}${bestDiff.diff.toFixed(1)} puan`,
+                sub:"Model / piyasa farkı"
+            }
+            : {
+                match:"Veri bekleniyor",
+                value:"—",
+                sub:"Model hesabı gerekli"
+            }
+
+    ];
+
+    featureBoxes.forEach((box,index)=>{
+
+        const item = values[index];
+
+        if(!item){
+            return;
+        }
+
+        const matchEl =
+            box.querySelector(".match");
+
+        const valueEl =
+            box.querySelector(".value");
+
+        const subEl =
+            box.querySelector(".sub");
+
+        if(matchEl){
+            matchEl.textContent = item.match;
+        }
+
+        if(valueEl){
+            valueEl.textContent = item.value;
+        }
+
+        if(subEl){
+            subEl.textContent = item.sub;
+        }
+
+    });
+}
+
+function renderTable(matches){
+
+    const tbody = $("matchRows");
+
+    if(!matches.length){
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10">
+                    <div class="empty">
+                        <strong>Maç bulunamadı</strong>
+                        API'den veri gelmedi.
+                    </div>
+                </td>
+            </tr>
+        `;
+
+        return;
+    }
+
+    tbody.innerHTML =
+        matches.map(match=>{
+
+            const score =
+                confidenceScore(match);
+
+            const odd1 =
+                getOdd(match,"1");
+
+            const oddX =
+                getOdd(match,"X");
+
+            const odd2 =
+                getOdd(match,"2");
+
+            return `
+                <tr>
+
+                    <td>
+                        ${escapeHtml(match.leagueName)}
+                    </td>
+
+                    <td>
+                        <b>
+                            ${escapeHtml(match.home)}
+                        </b>
+                        <span style="color:#667286"> vs </span>
+                        <b>
+                            ${escapeHtml(match.away)}
+                        </b>
+                    </td>
+
+                    <td>
+                        ${formatDate(match.date)}
+                    </td>
+
+                    <td class="green">
+                        ${escapeHtml(getPrediction(match))}
+                    </td>
+
+                    <td>
+                        —
+                    </td>
+
+                    <td>
+                        ${formatOdd(odd1)}
+                    </td>
+
+                    <td>
+                        ${formatOdd(oddX)}
+                    </td>
+
+                    <td>
+                        ${formatOdd(odd2)}
+                    </td>
+
+                    <td>
+                        ${score
+                            ? "%" + Math.round(score)
+                            : "—"}
+                    </td>
+
+                    <td class="${
+                        score >= 70
+                            ? "green"
+                            : score >= 55
+                                ? "yellow"
+                                : "red"
+                    }">
+                        ${score
+                            ? confidenceLabel(score)
+                            : "VERİ YOK"}
+                    </td>
+
+                </tr>
+            `;
+
+        }).join("");
+}
+
+function formatOdd(value){
+
+    return value === null
+        ? '<span class="red">—</span>'
+        : value.toFixed(2);
+}
+
+function formatDate(value){
+
+    if(!value){
+        return "—";
+    }
+
+    const d =
+        new Date(value);
+
+    if(Number.isNaN(d.getTime())){
+        return escapeHtml(value);
+    }
+
+    return d.toLocaleString(
+        "tr-TR",
+        {
+            day:"2-digit",
+            month:"2-digit",
+            hour:"2-digit",
+            minute:"2-digit"
+        }
+    );
+}
+
+function renderOdds(match){
+
+    const area = $("oddsArea");
+
+    if(!match){
+
+        area.innerHTML = `
+            <div class="odd-box">
+                <div class="odd-title">Açılış</div>
+                <div class="odd-value">—</div>
+                <div class="movement">Maç seçilmedi</div>
+            </div>
+
+            <div class="odd-box">
+                <div class="odd-title">Güncel</div>
+                <div class="odd-value">—</div>
+                <div class="movement">Maç seçilmedi</div>
+            </div>
+
+            <div class="odd-box">
+                <div class="odd-title">T-15</div>
+                <div class="odd-value">—</div>
+                <div class="movement">Snapshot gerekli</div>
+            </div>
+        `;
+
+        return;
+    }
+
+    const history =
+        match.historical ||
+        {};
+
+    const opening =
+        parseNumber(
+            history.opening ??
+            history.open ??
+            history.opening_odd
+        );
+
+    const current =
+        parseNumber(
+            history.current ??
+            history.latest ??
+            history.current_odd
+        );
+
+    const t15 =
+        parseNumber(
+            history.t15 ??
+            history.t_15 ??
+            history.closing_15
+        );
+
+    area.innerHTML = `
+        <div class="odd-box">
+
+            <div class="odd-title">
+                Bet365 Açılış MS 1
+            </div>
+
+            <div class="odd-value">
+                ${opening !== null
+                    ? opening.toFixed(2)
+                    : "—"}
+            </div>
+
+            <div class="movement">
+                ${opening !== null
+                    ? "Kayıt mevcut"
+                    : "Açılış snapshot yok"}
+            </div>
+
+        </div>
+
+        <div class="odd-box">
+
+            <div class="odd-title">
+                Bet365 Güncel MS 1
+            </div>
+
+            <div class="odd-value">
+                ${current !== null
+                    ? current.toFixed(2)
+                    : "—"}
+            </div>
+
+            <div class="movement">
+                ${
+                    opening !== null &&
+                    current !== null
+                        ? `${(((current-opening)/opening)*100).toFixed(1)}%`
+                        : "Hareket hesaplanamıyor"
+                }
+            </div>
+
+        </div>
+
+        <div class="odd-box">
+
+            <div class="odd-title">
+                Bet365 T-15 MS 1
+            </div>
+
+            <div class="odd-value">
+                ${t15 !== null
+                    ? t15.toFixed(2)
+                    : "—"}
+            </div>
+
+            <div class="movement">
+                ${
+                    t15 !== null
+                        ? "T-15 snapshot mevcut"
+                        : "T-15 snapshot henüz yok"
+                }
+            </div>
+
+        </div>
+    `;
+}
+
+function openDetail(index){
+
+    const match =
+        state.filtered
+            .slice()
+            .sort(
+                (a,b)=>
+                    confidenceScore(b) -
+                    confidenceScore(a)
+            )[index];
+
+    if(!match){
+        return;
+    }
+
+    $("detail").classList.add("open");
+
+    $("detailTitle").textContent =
+        `${match.home} - ${match.away}`;
+
+    $("detailSub").textContent =
+        `${match.leagueName} · ${formatDate(match.date)}`;
+
+    const history =
+        match.historical ||
+        {};
+
+    const snapshots =
+        match.snapshots ||
+        [];
+
+    $("detailBody").innerHTML = `
+
+        <div class="detail-grid">
+
+            <div class="odd-box">
+                <div class="odd-title">
+                    Model Tahmini
+                </div>
+
+                <div class="odd-value">
+                    ${escapeHtml(getPrediction(match))}
+                </div>
+
+                <div class="movement">
+                    Güven:
+                    ${Math.round(confidenceScore(match))}%
+                </div>
+            </div>
+
+            <div class="odd-box">
+                <div class="odd-title">
+                    Bet365 MS 1
+                </div>
+
+                <div class="odd-value">
+                    ${formatOdd(getOdd(match,"1"))}
+                </div>
+
+                <div class="movement">
+                    Bet365
+                </div>
+            </div>
+
+            <div class="odd-box">
+                <div class="odd-title">
+                    Bet365 MS X
+                </div>
+
+                <div class="odd-value">
+                    ${formatOdd(getOdd(match,"X"))}
+                </div>
+
+                <div class="movement">
+                    Bet365
+                </div>
+            </div>
+
+            <div class="odd-box">
+                <div class="odd-title">
+                    Bet365 MS 2
+                </div>
+
+                <div class="odd-value">
+                    ${formatOdd(getOdd(match,"2"))}
+                </div>
+
+                <div class="movement">
+                    Bet365
+                </div>
+            </div>
+
+        </div>
+
+        <div style="margin-top:15px">
+
+            <div class="panel">
+
+                <div class="panel-head">
+                    Bet365 Oran Geçmişi
+                </div>
+
+                <div class="panel-body">
+
+                    ${
+                        snapshots.length
+                            ? `
+                                <div class="table-wrap">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Zaman</th>
+                                                <th>MS 1</th>
+                                                <th>MS X</th>
+                                                <th>MS 2</th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+
+                                            ${
+                                                snapshots.map(s=>`
+
+                                                    <tr>
+                                                        <td>
+                                                            ${formatDate(
+                                                                s.timestamp ||
+                                                                s.time ||
+                                                                s.date
+                                                            )}
+                                                        </td>
+
+                                                        <td>
+                                                            ${formatOdd(
+                                                                parseNumber(
+                                                                    s.home ??
+                                                                    s.ms1 ??
+                                                                    s["1"]
+                                                                )
+                                                            )}
+                                                        </td>
+
+                                                        <td>
+                                                            ${formatOdd(
+                                                                parseNumber(
+                                                                    s.draw ??
+                                                                    s.msx ??
+                                                                    s["X"]
+                                                                )
+                                                            )}
+                                                        </td>
+
+                                                        <td>
+                                                            ${formatOdd(
+                                                                parseNumber(
+                                                                    s.away ??
+                                                                    s.ms2 ??
+                                                                    s["2"]
+                                                                )
+                                                            )}
+                                                        </td>
+                                                    </tr>
+
+                                                `).join("")
+                                            }
+
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `
+                            : `
+                                <div class="empty">
+                                    <strong>Snapshot geçmişi bulunmuyor</strong>
+                                    T-15 analizi için backend'in Bet365 oranlarını
+                                    düzenli olarak kaydetmesi gerekir.
+                                </div>
+                            `
+                    }
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div style="margin-top:15px">
+
+            <div class="status-box">
+
+                <b>Geçmiş oran analizi:</b>
+
+                ${
+                    history.success_rate !== undefined
+                        ? `Geçmiş benzer oran başarı oranı: %${escapeHtml(history.success_rate)}`
+                        : "Bu maç için geçmiş benzer oran sonucu backend'den gelmedi."
+                }
+
+                <br><br>
+
+                Sistem geçmiş oran verisi yokken
+                başarı yüzdesi uydurmaz.
+
+            </div>
+
+        </div>
+    `;
+}
+
+function closeDetail(){
+    $("detail").classList.remove("open");
+}
+
+function loadDemo(){
+
+    state.mode = "demo";
+
+    $("apiBadge").innerHTML =
+        `● API: <strong style="color:var(--yellow)">DEMO</strong>`;
+
+    state.matches = [
+        demoMatch(
+            1,
+            "Premier Lig",
+            "39",
+            "Liverpool",
+            "Newcastle United",
+            48,
+            2.05,
+            3.55,
+            3.45
+        ),
+
+        demoMatch(
+            2,
+            "La Liga",
+            "140",
+            "Villarreal",
+            "Barcelona",
+            54,
+            2.05,
+            3.70,
+            3.25
+        ),
+
+        demoMatch(
+            3,
+            "La Liga",
+            "140",
+            "Real Betis",
+            "Girona",
+            63,
+            2.31,
+            3.30,
+            3.10
+        ),
+
+        demoMatch(
+            4,
+            "Bundesliga",
+            "78",
+            "RB Leipzig",
+            "SC Freiburg",
+            52,
+            2.03,
+            3.70,
+            3.40
+        ),
+
+        demoMatch(
+            5,
+            "Süper Lig",
+            "203",
+            "Beşiktaş",
+            "Fenerbahçe",
+            40,
+            3.61,
+            3.40,
+            2.10
+        )
+    ];
+
+    render();
+
+    setStatus(
+        "Demo verisi aktif. Gerçek API için API'yi Test Et kullanın.",
+        "info"
+    );
+}
+
+function demoMatch(
+    id,
+    leagueName,
+    leagueId,
+    home,
+    away,
+    probability,
+    odd1,
+    oddX,
+    odd2
+){
+
+    return {
+        id,
+        home,
+        away,
+        leagueId,
+        leagueName,
+        date:new Date(
+            Date.now()+86400000
+        ).toISOString(),
+
+        probability:{
+            home:probability
+        },
+
+        bet365:{
+            "1":odd1,
+            "X":oddX,
+            "2":odd2
+        },
+
+        historical:{
+            opening:odd1+0.10,
+            current:odd1
+        },
+
+        snapshots:[]
+    };
+}
+
+function updateClock(){
+
+    const now =
+        new Date();
+
+    $("clock").textContent =
+        now.toLocaleString(
+            "tr-TR",
+            {
+                day:"2-digit",
+                month:"2-digit",
+                year:"numeric",
+                hour:"2-digit",
+                minute:"2-digit",
+                second:"2-digit"
+            }
+        );
+}
+
+setInterval(
+    updateClock,
+    1000
+);
+
+updateClock();
+
+/*
+    Save backend URL locally.
+*/
+
+const savedBackend =
+    localStorage.getItem(
+        "macanaliz_backend"
+    );
+
+if(savedBackend){
+    $("backendUrl").value =
+        savedBackend;
+}
+
+$("backendUrl")
+    .addEventListener(
+        "change",
+        ()=>{
+            localStorage.setItem(
+                "macanaliz_backend",
+                cleanUrl()
+            );
+        }
+    );
+
+/*
+    Initial demo data.
+*/
+
+loadDemo();
+
+</script>
+
+</body>
+</html>
