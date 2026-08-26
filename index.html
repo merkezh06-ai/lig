@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
@@ -386,7 +386,7 @@ footer{margin-top:50px;padding:22px 0 10px;border-top:1px solid var(--border-sof
 </div>
 
 <div class="demo-banner">
-  ⚠ <b>VERİ MODU</b> — API anahtarı girilmediğinde uygulama sentetik demo verisi kullanır. API anahtarı girildiğinde gerçek API-Football fikstür ve oran verileri yüklenir. Hiçbir tahmin kesin sonuç veya kazanç garantisi değildir.
+  ⚠ <b>BET365 ODAKLI VERİ MODU</b> — API anahtarı girilmediğinde uygulama demo verisi kullanır. Gerçek API modunda yalnızca Bet365 MS 1/X/2 oranları analiz edilir; Bet365 oranı olmayan maçlar elenir. Hiçbir tahmin kesin sonuç veya kazanç garantisi değildir.
 </div>
 
 <header class="topbar">
@@ -498,12 +498,12 @@ footer{margin-top:50px;padding:22px 0 10px;border-top:1px solid var(--border-sof
     <div class="api-field"><label>API-Football API Key</label><input id="apiKeyInput" type="password" autocomplete="off" placeholder="x-apisports-key değeriniz"></div>
     <div class="api-field"><label>Sezon</label><input id="apiSeasonInput" type="number" min="2020" max="2100" value="2026"></div>
     <div class="api-field"><label>Lig ID'leri</label><input id="apiLeaguesInput" type="text" value="39,140,135,78,61,203"></div>
-    <div class="api-field"><label>Tercih edilen bookmaker</label><input id="apiBookmakerInput" type="text" value="Bet365"></div>
+    <div class="api-field"><label>Oran sağlayıcı</label><input id="apiBookmakerInput" type="text" value="Bet365" readonly style="opacity:.85;cursor:not-allowed"></div>
     <div class="api-actions"><button class="btn primary" id="btnApiConnect">API'ye Bağlan</button><button class="btn" id="btnApiClear">Anahtarı Sil</button></div>
-    <div class="api-help">Bu tek HTML sürümünde API anahtarı tarayıcıda tutulur ve localStorage'a kaydedilir. Üretimde güvenli yöntem backend/proxy kullanmaktır. API-Football; fikstür, oran, sakatlık, kadro ve diğer futbol verilerini endpoint'ler üzerinden sağlar. API anahtarını GitHub kaynak koduna yazmayın.</div>
+    <div class="api-help"><b>BET365 KİLİTLİ:</b> Analiz motorunda bookmaker olarak yalnızca Bet365 kullanılır. Bet365 oranı API'den gelmezse maç tahmine alınmaz; başka bookmaker'a otomatik geçiş yapılmaz. Bu tek HTML sürümünde API anahtarı tarayıcıda tutulur. Üretimde güvenli yöntem backend/proxy kullanmaktır. API anahtarını GitHub kaynak koduna yazmayın.</div>
 
     <div class="drawer-sub">Gerçek Veriye Bağlanma</div>
-    <div class="note">Üretimde: (1) FOOTBALL_API_KEY, ODDS_API_KEY, DATABASE_URL gibi anahtarları yalnızca backend ortam değişkenlerinde tutan bir sunucu katmanı, (2) Bet365 için lisanslı bir oran veri sağlayıcısı (doğrudan scraping değil), (3) geçmiş oran/sonuç verisini saklayan bir veritabanı gerekir. Bu tek-dosya HTML istemcisi, API anahtarını güvenle saklayamayacağı için kasıtlı olarak DEMO MODU'nda çalışır.</div>
+    <div class="note">Üretimde: (1) FOOTBALL_API_KEY, DATABASE_URL ve diğer anahtarları yalnızca backend ortam değişkenlerinde tutan sunucu katmanı, (2) <b>Bet365'i açıkça destekleyen lisanslı oran veri sağlayıcısı</b> veya API sağlayıcısı, (3) açılış ve T-15 snapshotlarını maç sonucu ile eşleştiren veritabanı gerekir. Doğrudan Bet365 scraping kullanılmaz. Bet365 verisi yoksa sistem başka bookmaker'a geçmez.</div>
   </div>
 </div>
 
@@ -1228,7 +1228,7 @@ function renderTop5(){
         '<div class="perf"></div>'+
         '<div class="ticket-bottom">'+
           '<div class="ticket-pick-row"><span class="ticket-pick">MS '+p.msLabel+'</span><span class="ticket-pct">'+fmtPct(p.ms[p.msPickIdx])+'</span></div>'+
-          '<div class="ticket-move">Bet365: '+fmtOdds(p.fx.openOdds.h)+' → '+fmtOdds(p.fx.t15Odds.h)+'  ('+(mv>0?'+':'')+round1(mv)+'% '+moveArrow+')</div>'+
+          '<div class="ticket-move">Bet365: '+fmtOdds(p.fx.openOdds.h)+' → '+fmtOdds(p.fx.t15Odds.h)+' · '+(p.fx.oddsStage||'T-15')+' ('+(mv>0?'+':'')+round1(mv)+'% '+moveArrow+')</div>'+
           '<div class="ticket-stats"><span>Tarihsel: <b>'+fmtPct((p.bkH.p1+p.bkH.pX+p.bkH.p2>0? (p.msPickIdx===0?p.bkH.p1:(p.msPickIdx===1?p.bkH.pX:p.bkH.p2)):0))+'</b></span><span>n=<b>'+p.sampleN+'</b></span></div>'+
           '<div class="conf-bar"><i style="width:'+p.conf.score+'%"></i></div>'+
           '<div class="conf-num">GÜVEN '+p.conf.score+'/100</div>'+
@@ -1306,6 +1306,7 @@ function renderMatchCard(p){
       '<div class="mcard-row"><span class="lbl">KG</span><span class="val">'+(p.kgProb>0.5?'VAR '+fmtPct(p.kgProb):'YOK '+fmtPct(1-p.kgProb))+'</span></div>'+
       '<div class="mcard-row"><span class="lbl">2.5 Gol</span><span class="val">'+(p.over25>0.5?'ÜST '+fmtPct(p.over25):'ALT '+fmtPct(1-p.over25))+'</span></div>'+
       '<div class="mcard-row"><span class="lbl">Bet365 Hareket</span><span class="val '+moveCls+'">'+fmtOdds(p.fx.openOdds.h)+' → '+fmtOdds(p.fx.t15Odds.h)+' ('+(mv>0?'+':'')+round1(mv)+'%)</span></div>'+
+      '<div class="mcard-row"><span class="lbl">Oran Aşaması</span><span class="val">'+(p.fx.oddsStage||'T-15 / güncel')+'</span></div>'+
       '<div class="mcard-row"><span class="lbl">Model Güveni</span><span class="conf-chip '+confClass(p.conf.score)+'">'+p.conf.score+'/100</span></div>'+
       '<div class="mcard-foot"><button class="expand-btn" data-toggle="'+p.fx.id+'">'+(STATE.expanded===p.fx.id?'Detayı Kapat ▲':'Detaylı Analiz ▼')+'</button></div>'+
     '</div>'
@@ -1516,7 +1517,7 @@ function tabBet365(p){
   return (
     '<div class="two-col">'+
       '<div>'+
-        '<div style="font-weight:700;margin-bottom:6px;">Oran geçmişi → Güncel (Maç Sonucu 1)</div>'+
+        '<div style="font-weight:700;margin-bottom:6px;">Bet365 Oran Geçmişi → Güncel (Maç Sonucu 1)</div>'+
         '<table class="odds-table"><thead><tr><th>Market</th><th>Açılış</th><th>T-15dk</th><th>Değişim</th></tr></thead><tbody>'+oddsRowsForFixture(p)+'</tbody></table>'+
         '<div class="note" style="margin-top:10px">'+
           (Math.abs(p.movePctH)>1.5? ('Ev sahibi oranı '+(p.movePctH<0?'düştü':'yükseldi')+' → piyasa '+(p.movePctH<0?'ev sahibi lehine':'ev sahibi aleyhine')+' hareket etti.') : 'Ev sahibi oranında belirgin bir yön değişikliği yok, oran görece sabit.')+
@@ -1542,7 +1543,8 @@ function tabTarihsel(p){
       '<div class="badge"><div class="k">X sonucu</div><div class="v">'+fmtPct(p.bkH.pX)+'</div></div>'+
       '<div class="badge"><div class="k">2 sonucu</div><div class="v">'+fmtPct(p.bkH.p2)+'</div></div>'+
     '</div>'+
-    '<div style="font-weight:700;margin:18px 0 6px;">Benzer Oran Hareketi → Sonuç ('+round1(p.movePctH)+'%, '+p.mvH.dir+' '+p.mvH.mag+')</div>'+
+    '<div class="note warn" style="margin-top:12px">Bet365 kuralı: canlı maç oranı yalnızca Bet365\'ten alınır. Bu ekranın 15 yıllık oran-sonuç referans tablosu mevcut tek-dosya sürümünde sentetik demo geçmişidir; gerçek Bet365 tarihçesi backend veritabanında biriktirildiğinde bu tablo onunla değiştirilecektir.</div>'+
+    '<div style="font-weight:700;margin:18px 0 6px;">Benzer Bet365 Oran Hareketi → Sonuç ('+round1(p.movePctH)+'%, '+p.mvH.dir+' '+p.mvH.mag+')</div>'+
     '<div class="badge-grid">'+
       '<div class="badge"><div class="k">Benzer hareketli maç</div><div class="v">'+p.mvH.n+'</div></div>'+
       '<div class="badge"><div class="k">Ev sahibi</div><div class="v">'+fmtPct(p.mvH.p1)+'</div></div>'+
@@ -1755,12 +1757,16 @@ const API_DEFAULTS = {
   key:'',
   season:2026,
   leagues:[39,140,135,78,61,203],
-  bookmaker:'Bet365'
+  bookmaker:'Bet365',
+  bookmakerId:null
 };
+const BET365_NAME = 'Bet365'; // SİSTEMDEKİ TEK BOOKMAKER — başka sağlayıcıya fallback YOK
 let API_CONFIG = loadApiConfig();
 let API_ONLINE = false;
 let API_FIXTURES = [];
 const API_CACHE = new Map();
+let BET365_RESOLVED_ID = null;
+let BET365_POLL_TIMER = null;
 
 function loadApiConfig(){
   try{
@@ -1780,7 +1786,7 @@ function apiSetStatus(type,text){
   const mode=document.getElementById('apiModeLabel');
   const odds=document.getElementById('oddsModeLabel');
   if(mode) mode.textContent=API_ONLINE?'LIVE API':'DEMO MODE';
-  if(odds) odds.textContent=API_ONLINE?'API-Football':'Sentetik';
+  if(odds) odds.textContent=API_ONLINE?'Bet365':'Sentetik';
 }
 function hydrateApiForm(){
   const k=document.getElementById('apiKeyInput'),s=document.getElementById('apiSeasonInput'),l=document.getElementById('apiLeaguesInput'),b=document.getElementById('apiBookmakerInput');
@@ -1813,25 +1819,79 @@ function safeNum(v,fallback=0){ const n=Number(v); return Number.isFinite(n)?n:f
 function findOddsTriplet(oddsResponse,preferred){
   const response=Array.isArray(oddsResponse?.response)?oddsResponse.response:[];
   if(!response.length) return null;
+
+  // KURAL: Bu uygulama yalnızca Bet365 kullanır.
+  // Başka bookmaker'a FALLBACK YOKTUR.
+  const target=String(preferred||BET365_NAME).trim().toLowerCase();
   const names=[];
   response.forEach(r=>(r.bookmakers||[]).forEach(b=>names.push(b)));
-  let bm=names.find(b=>String(b.name||'').toLowerCase()===String(preferred||'Bet365').toLowerCase());
-  if(!bm) bm=names.find(b=>/bet365/i.test(String(b.name||'')))||names[0];
+
+  const bm=names.find(b=>String(b.name||'').trim().toLowerCase()===target);
   if(!bm) return null;
-  const market=(bm.bets||[]).find(b=>/match winner|1x2|fulltime result/i.test(String(b.name||''))) || (bm.bets||[])[0];
+
+  const market=(bm.bets||[]).find(b=>/match winner|1x2|fulltime result/i.test(String(b.name||'')));
   if(!market || !Array.isArray(market.values)) return null;
+
   const out={};
   market.values.forEach(v=>{
-    const n=String(v.value||'').toLowerCase();
+    const n=String(v.value||'').toLowerCase().trim();
     const odd=safeNum(v.odd,0);
     if(!odd) return;
     if(n==='home'||n==='1'||/home/.test(n)) out.h=odd;
     else if(n==='draw'||n==='x'||/draw/.test(n)) out.d=odd;
     else if(n==='away'||n==='2'||/away/.test(n)) out.a=odd;
   });
-  if(out.h&&out.d&&out.a) return {odds:out,bookmaker:bm.name||preferred||'Bookmaker',update:response[0].update||bm.update||null};
+
+  if(out.h&&out.d&&out.a){
+    return {
+      odds:out,
+      bookmaker:BET365_NAME,
+      bookmakerId:bm.id||null,
+      update:response[0].update||bm.update||null
+    };
+  }
   return null;
 }
+
+async function resolveBet365Bookmaker(){
+  if(BET365_RESOLVED_ID) return BET365_RESOLVED_ID;
+  try{
+    const data=await apiFetch('/odds/bookmakers',{search:BET365_NAME});
+    const rows=Array.isArray(data?.response)?data.response:[];
+    const exact=rows.find(x=>String(x.name||'').trim().toLowerCase()===BET365_NAME.toLowerCase());
+    if(!exact) throw new Error('API-Football bookmaker listesinde Bet365 bulunamadı.');
+    BET365_RESOLVED_ID=exact.id;
+    API_CONFIG.bookmakerId=exact.id;
+    saveApiConfig();
+    return exact.id;
+  }catch(e){
+    throw new Error('Bet365 bookmaker ID çözülemedi: '+e.message);
+  }
+}
+
+function isNearT15(fx, snapshotTime){
+  if(!fx?.kickoff) return false;
+  const k=new Date(fx.kickoff).getTime();
+  const t=new Date(snapshotTime).getTime();
+  const diffMin=(k-t)/60000;
+  return diffMin>=0 && diffMin<=20;
+}
+
+function selectBet365Snapshots(fx,history){
+  const arr=(history||[]).slice().sort((a,b)=>a.t-b.t);
+  if(!arr.length) return {open:null,t15:null,timeline:[],stage:'YOK'};
+
+  const open=arr[0];
+  let t15=arr.find(x=>isNearT15(fx,x.t));
+  if(!t15){
+    // T-15 snapshot henüz yakalanmadıysa en son Bet365 snapshotı kullan,
+    // fakat UI'da bunun gerçek T-15 olmadığı açıkça belirtilsin.
+    t15=arr[arr.length-1];
+  }
+  const stage=isNearT15(fx,t15.t)?'T-15':'GÜNCEL';
+  return {open,t15,timeline:arr,stage};
+}
+
 function readOddsHistory(){
   try{return JSON.parse(localStorage.getItem('macanaliz_odds_history')||'{}');}catch(e){return {};}
 }
@@ -1853,35 +1913,39 @@ function rememberOdds(fixtureId,oddsInfo){
 }
 async function fetchApiOdds(fixtureId){
   try{
-    const data=await apiFetch('/odds',{fixture:fixtureId});
-    const info=findOddsTriplet(data,API_CONFIG.bookmaker);
-    if(!info) return null;
+    const bookmakerId=await resolveBet365Bookmaker();
+    const data=await apiFetch('/odds',{fixture:fixtureId,bookmaker:bookmakerId});
+    const info=findOddsTriplet(data,BET365_NAME);
+    // Bet365 yoksa null. Kesinlikle başka bookmaker kullanılmaz.
+    if(!info || String(info.bookmaker).toLowerCase()!==BET365_NAME.toLowerCase()) return null;
     const history=rememberOdds(fixtureId,info);
     return {info,history};
-  }catch(e){ return null; }
+  }catch(e){
+    console.warn('Bet365 odds error',fixtureId,e);
+    return null;
+  }
 }
+
 function apiFixtureToLocal(raw,oddsInfo,dateTag){
   const id=raw?.fixture?.id;
   const leagueId=raw?.league?.id;
   const lgKey=leagueKeyFromId(leagueId);
   if(!id||!lgKey) return null;
+
   const kickoff=new Date(raw.fixture.date);
   const home=raw.teams?.home?.name||'Ev Sahibi';
   const away=raw.teams?.away?.name||'Deplasman';
   const hId=raw.teams?.home?.id, aId=raw.teams?.away?.id;
-  let openOdds=null,t15Odds=null,timeline=[];
-  if(oddsInfo?.odds){
-    openOdds={...oddsInfo.odds}; t15Odds={...oddsInfo.odds};
-    const t=oddsInfo.update?new Date(oddsInfo.update):new Date();
-    timeline=[{t,h:t15Odds.h,d:t15Odds.d,a:t15Odds.a}];
-  }else{
-    const [ph,pd,pa]=elo3way(TEAM_STATE[home]?.elo||1750,TEAM_STATE[away]?.elo||1750);
-    const tri=normalizeVec([ph,pd,pa]);
-    openOdds={h:oddsFromProb(tri[0],1.06),d:oddsFromProb(tri[1],1.06),a:oddsFromProb(tri[2],1.06)};
-    t15Odds={...openOdds}; timeline=[{t:kickoff,h:openOdds.h,d:openOdds.d,a:openOdds.a}];
-  }
-  return {id,league:lgKey,leagueId,season:raw.league?.season,home,away,homeId:hId,awayId:aId,kickoff,dateTag,openOdds,t15Odds,timeline,apiRaw:raw,realApi:true};
+
+  return {
+    id, league:lgKey, leagueId, season:raw.league?.season,
+    home, away, homeId:hId, awayId:aId, kickoff, dateTag,
+    openOdds:null, t15Odds:null, timeline:[],
+    bookmaker:BET365_NAME, oddsAvailable:false,
+    oddsStage:'YOK', apiRaw:raw, realApi:true
+  };
 }
+
 async function fetchApiFixturesForDate(date,tag){
   const out=[];
   const leagues=API_CONFIG.leagues||[];
@@ -1898,41 +1962,75 @@ async function fetchApiFixturesForDate(date,tag){
 }
 async function loadRealApiFixtures(){
   if(!API_CONFIG.key) return false;
-  apiSetStatus('', 'API verileri çekiliyor…');
-  const today=new Date(); const tomorrow=addDays(today,1);
-  const [a,b]=await Promise.all([fetchApiFixturesForDate(apiDate(today),'today'),fetchApiFixturesForDate(apiDate(tomorrow),'tomorrow')]);
+
+  apiSetStatus('', 'API verileri çekiliyor — Bet365 zorunlu…');
+  await resolveBet365Bookmaker();
+
+  const today=new Date();
+  const tomorrow=addDays(today,1);
+  const [a,b]=await Promise.all([
+    fetchApiFixturesForDate(apiDate(today),'today'),
+    fetchApiFixturesForDate(apiDate(tomorrow),'tomorrow')
+  ]);
+
   let fixtures=[...a,...b];
   const unique=[]; const seen=new Set();
-  fixtures.forEach(f=>{if(!seen.has(f.id)){seen.add(f.id);unique.push(f);}});
+  fixtures.forEach(f=>{
+    if(!seen.has(f.id)){seen.add(f.id);unique.push(f);}
+  });
+
   if(!unique.length) throw new Error('Seçilen liglerde bugün/yarın API fikstürü bulunamadı.');
-  // Oran çağrılarını kontrollü yap; ilk 40 maç yeterli.
+
+  // Free planda kota korunması için ilk 40 maçı kontrol et.
   const limited=unique.slice(0,40);
+  const withBet365=[];
+
   for(const fx of limited){
     const odds=await fetchApiOdds(fx.id);
     if(odds?.info){
-      const h=odds.history||[];
-      const first=h[0]||{t:Date.now(),...odds.info.odds};
-      const last=h[h.length-1]||{t:Date.now(),...odds.info.odds};
-      fx.openOdds={h:first.h,d:first.d,a:first.a};
-      fx.t15Odds={h:last.h,d:last.d,a:last.a};
-      fx.timeline=h.map(x=>({t:new Date(x.t),h:x.h,d:x.d,a:x.a}));
-      if(!fx.timeline.length) fx.timeline=[{t:new Date(last.t),h:last.h,d:last.d,a:last.a}];
-      fx.bookmaker=odds.info.bookmaker;
-      fx.oddsHistoryCount=h.length;
+      const selected=selectBet365Snapshots(fx,odds.history||[]);
+      if(selected.open && selected.t15){
+        fx.openOdds={h:selected.open.h,d:selected.open.d,a:selected.open.a};
+        fx.t15Odds={h:selected.t15.h,d:selected.t15.d,a:selected.t15.a};
+        fx.timeline=selected.timeline.map(x=>({
+          t:new Date(x.t),h:x.h,d:x.d,a:x.a
+        }));
+        fx.bookmaker=BET365_NAME;
+        fx.bookmakerId=odds.info.bookmakerId||BET365_RESOLVED_ID;
+        fx.oddsHistoryCount=(odds.history||[]).length;
+        fx.oddsStage=selected.stage;
+        fx.oddsAvailable=true;
+        withBet365.push(fx);
+      }
     }
   }
-  API_FIXTURES=unique;
+
+  // KRİTİK: Bet365 oranı olmayan maçlar analizden çıkarılır.
+  if(!withBet365.length){
+    throw new Error('Seçilen maçlarda Bet365 MS 1/X/2 oranı bulunamadı. Başka bookmaker kullanılmayacak.');
+  }
+
+  API_FIXTURES=withBet365;
   API_ONLINE=true;
-  apiSetStatus('ok','LIVE API bağlı — '+unique.length+' gerçek fikstür yüklendi.');
+  apiSetStatus('ok','LIVE API + BET365 bağlı — '+withBet365.length+' maç analiz ediliyor.');
   return true;
 }
+
 function rebuildApiPipeline(){
-  FIXTURES=API_FIXTURES.slice();
+  FIXTURES=API_FIXTURES.filter(fx=>
+    fx.realApi &&
+    fx.oddsAvailable &&
+    String(fx.bookmaker||'').toLowerCase()===BET365_NAME.toLowerCase()
+  ).slice();
+
   const preds=FIXTURES.map(fx=>{
     const p=predictFixture(fx,TEAM_STATE,BUCKET_STATS,MOVE_STATS,WEIGHTS);
+    p.fx.bet365Only=true;
+    p.fx.historicalSource='DEMO_SENTETIK_15Y'; // Gerçek Bet365 tarihçesi henüz backend DB'den gelmiyor.
     const conf=computeConfidence(p,CONF_WEIGHTS);
     return Object.assign(p,{conf});
   });
+
   STATE.predictions=preds;
   STATE.top5=preds.slice().sort((a,b)=>b.conf.score-a.conf.score).slice(0,5);
   STATE.highlights=computeHighlights(preds);
@@ -1945,13 +2043,14 @@ async function connectRealApi(){
   API_CONFIG.key=key;
   API_CONFIG.season=safeNum(document.getElementById('apiSeasonInput')?.value,new Date().getFullYear());
   API_CONFIG.leagues=(document.getElementById('apiLeaguesInput')?.value||'').split(',').map(x=>Number(x.trim())).filter(Boolean);
-  API_CONFIG.bookmaker=(document.getElementById('apiBookmakerInput')?.value||'Bet365').trim()||'Bet365';
+  API_CONFIG.bookmaker=BET365_NAME;
   saveApiConfig();
   const btn=document.getElementById('btnApiConnect');
   if(btn){btn.disabled=true;btn.textContent='Bağlanıyor…';}
   try{
     await loadRealApiFixtures();
     rebuildApiPipeline();
+    startBet365Polling();
   }catch(e){
     API_ONLINE=false;
     apiSetStatus('err','API bağlantısı başarısız: '+e.message);
@@ -1960,7 +2059,24 @@ async function connectRealApi(){
     if(btn){btn.disabled=false;btn.textContent='API\'ye Bağlan';}
   }
 }
+function startBet365Polling(){
+  if(BET365_POLL_TIMER) clearInterval(BET365_POLL_TIMER);
+  // Açılış/T-15 takibi için sayfa açıkken 15 dakikada bir yeni Bet365 snapshotı yakala.
+  BET365_POLL_TIMER=setInterval(async ()=>{
+    if(!API_ONLINE || !API_CONFIG.key) return;
+    try{
+      await loadRealApiFixtures();
+      rebuildApiPipeline();
+    }catch(e){
+      console.warn('Bet365 periyodik güncelleme:',e.message);
+    }
+  },15*60*1000);
+}
+
 function clearApiConfig(){
+  if(BET365_POLL_TIMER) clearInterval(BET365_POLL_TIMER);
+  BET365_POLL_TIMER=null;
+  BET365_RESOLVED_ID=null;
   API_CONFIG=Object.assign({},API_DEFAULTS); API_CACHE.clear(); API_FIXTURES=[]; API_ONLINE=false;
   localStorage.removeItem('macanaliz_api_config');
   hydrateApiForm();
@@ -1994,6 +2110,7 @@ async function init(){
             try{
               await loadRealApiFixtures();
               rebuildApiPipeline();
+              startBet365Polling();
             }catch(e){
               API_ONLINE=false;
               apiSetStatus('err','API bağlanamadı, DEMO MODU kullanılıyor: '+e.message);
