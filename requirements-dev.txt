@@ -1,0 +1,3 @@
+-r requirements.txt
+# Testler stdlib unittest ile de calisir; pytest yalnizca kolaylik icin.
+pytest>=8.0

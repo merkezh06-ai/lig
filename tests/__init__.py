@@ -1,0 +1,1 @@
+"""MACANALIZ PRO test paketi."""

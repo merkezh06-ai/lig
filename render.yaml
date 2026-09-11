@@ -1,0 +1,24 @@
+# Render Blueprint - "New > Blueprint" ile bu repoyu secerek kullanabilirsiniz.
+services:
+  - type: web
+    name: macanaliz-pro-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: API_FOOTBALL_KEY
+        sync: false          # Render panelinden elle girilir, repoda tutulmaz
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: TIMEZONE
+        value: Europe/Istanbul
+      - key: SNAPSHOT_ENABLED
+        value: "true"
+      - key: SNAPSHOT_INTERVAL_MINUTES
+        value: "180"

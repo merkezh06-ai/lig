@@ -1,922 +1,925 @@
-import os
-import asyncio
-from datetime import date, datetime, timedelta
-from typing import Optional
+"""MACANALIZ PRO - FastAPI uygulamasi.
 
-import httpx
-from fastapi import FastAPI, HTTPException, Query
+Bu dosya YALNIZCA HTTP katmanidir: parametre dogrulama, yonlendirme, hata
+cevirisi. Is mantigi ``services.py`` ve ``analysis_engine.py`` icindedir.
+
+Render icin baslatma komutu:
+    uvicorn backend:app --host 0.0.0.0 --port $PORT
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import date, datetime
+from typing import Any, Sequence
+
+from fastapi import Depends, FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from api_client import ApiFootballClient, CallBudget
+from bookmakers import BookmakerResolver
+from config import APP_NAME, APP_VERSION, Settings, configure_logging, get_settings
+from database import Database, get_database
+from errors import AppError, ValidationError
+from models import (
+    HighlightCard,
+    PlanAccess,
+    MatchDetail,
+    MatchesResponse,
+    QuotaInfo,
+    StatusResponse,
+    Top5Response,
+)
+from scheduler import SnapshotScheduler
+from services import (
+    MatchService,
+    build_highlights,
+    default_date_range,
+)
+from snapshots import load_snapshots
+
+logger = logging.getLogger(__name__)
+
+MAX_RANGE_DAYS = 30
+
+#: Backend/frontend sozlesme surumu. Frontend bunu /api/config'de arar; yoksa
+#: veya tutmuyorsa "bu adreste baska bir uygulama calisiyor" der. Sozlesme
+#: kirici degisikliklerde artirilir.
+API_CONTRACT = "macanaliz-pro/1"
 
 
-# =========================================================
-# MACANALIZ PRO - BACKEND
-# API-FOOTBALL + BET365
-# =========================================================
+# ==========================================================================
+# Uygulama yasam dongusu
+# ==========================================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    configure_logging(settings)
+    logger.info("%s v%s baslatiliyor", APP_NAME, APP_VERSION)
 
-BASE_URL = "https://v3.football.api-sports.io"
-BET365_NAME = "Bet365"
+    database = get_database(settings)
+    try:
+        database.init_schema()
+    except AppError:
+        logger.exception("Veritabani semasi olusturulamadi")
 
-DEFAULT_LEAGUES = "39,140,135,78,61,203"
+    client = ApiFootballClient(settings, database)
+    resolver = BookmakerResolver(client, database, settings)
+    service = MatchService(client, database, resolver, settings)
+    scheduler = SnapshotScheduler(client, database, resolver, service, settings)
 
-app = FastAPI(title="MACANALIZ PRO API", version="2.0")
+    app.state.settings = settings
+    app.state.database = database
+    app.state.client = client
+    app.state.resolver = resolver
+    app.state.service = service
+    app.state.scheduler = scheduler
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
-    allow_headers=["*"],
+    if not settings.api_key_configured:
+        logger.error(
+            "API_FOOTBALL_KEY tanimli degil. Uygulama ayakta ama veri cekemez."
+        )
+    if not database.persistent:
+        logger.warning(
+            "Kalici olmayan veritabani (SQLite). Snapshot gecmisi restart'ta silinir."
+        )
+
+    await scheduler.start()
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+        await client.aclose()
+        logger.info("%s kapatildi", APP_NAME)
+
+
+app = FastAPI(
+    title=APP_NAME,
+    version=APP_VERSION,
+    description=(
+        "Futbol mac ve Bet365 oran analizi. Kazanc garantisi vermez, "
+        "kesin sonuc iddia etmez, veri uydurmaz."
+    ),
+    lifespan=lifespan,
 )
 
-client: Optional[httpx.AsyncClient] = None
-
-# Cache
-bookmaker_cache = None
-bookmaker_cache_time = None
-
-# Çalışma sırasında oran snapshotları.
-# Kalıcı T-15 geçmişi için ileride PostgreSQL eklenebilir.
-odds_snapshots = {}
-
-
-# =========================================================
-# HTTP CLIENT
-# =========================================================
-
-@app.on_event("startup")
-async def startup():
-    global client
-
-    client = httpx.AsyncClient(
-        timeout=httpx.Timeout(25.0, connect=10.0)
-    )
+_settings_at_import = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_settings_at_import.allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    # X-Request-ID expose EDILMEZSE tarayici onu cross-origin okuyamaz ve
+    # frontend'deki hata, Render logundaki satirla eslestirilemez.
+    expose_headers=["X-Request-ID"],
+)
 
 
-@app.on_event("shutdown")
-async def shutdown():
-    global client
-
-    if client:
-        await client.aclose()
-        client = None
+# ==========================================================================
+# Bagimliliklar
+# ==========================================================================
+def get_service(request: Request) -> MatchService:
+    return request.app.state.service
 
 
-# =========================================================
-# API KEY
-# =========================================================
-
-def get_api_key():
-    value = os.getenv("API_FOOTBALL_KEY", "").strip()
-
-    if not value:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "API_FOOTBALL_KEY bulunamadı. "
-                "Render > Environment Variables bölümüne "
-                "API_FOOTBALL_KEY eklenmelidir."
-            ),
-        )
-
-    return value
+def get_client(request: Request) -> ApiFootballClient:
+    return request.app.state.client
 
 
-# =========================================================
-# API-FOOTBALL REQUEST
-# =========================================================
+def settings_dep() -> Settings:
+    return get_settings()
 
-async def api_get(path: str, params=None):
-    global client
 
-    if client is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Backend HTTP istemcisi henüz hazır değil."
-        )
+# ==========================================================================
+# Istek loglama - Render logunda TEK BIR istegi bulabilmek icin
+# ==========================================================================
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Her istegi request-id ile loglar ve cevaba X-Request-ID ekler.
 
-    headers = {
-        "x-apisports-key": get_api_key(),
-        "Accept": "application/json",
-    }
-
+    Tarayicida bir hata gorulunce, ayni id ile Render logundaki satir
+    bulunabilir. API anahtari loglanmaz (config.SecretRedactingFilter ayrica
+    guvence saglar) ve query string'imiz sir icermez.
+    """
+    request_id = uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    query = request.url.query or "-"
     try:
-        response = await client.get(
-            BASE_URL + path,
-            params=params or {},
-            headers=headers,
-        )
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"API-Football bağlantı hatası: {exc}",
-        )
-
-    try:
-        data = response.json()
+        response = await call_next(request)
     except Exception:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"API-Football JSON döndürmedi. "
-                f"HTTP {response.status_code}"
-            ),
+        elapsed = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "rid=%s %s %s ?%s -> ISTISNA (%.0f ms)",
+            request_id, request.method, request.url.path, query, elapsed,
         )
-
-    # API seviyesindeki hatalar
-    errors = data.get("errors")
-
-    if errors:
-        if isinstance(errors, dict):
-            message = " | ".join(
-                f"{k}: {v}" for k, v in errors.items()
-            )
-        elif isinstance(errors, list):
-            message = " | ".join(str(x) for x in errors)
-        else:
-            message = str(errors)
-
-        raise HTTPException(
-            status_code=400,
-            detail=f"API-Football: {message}",
-        )
-
-    if response.status_code >= 400:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"API-Football HTTP {response.status_code}",
-        )
-
-    return data
+        raise
+    elapsed = (time.perf_counter() - started) * 1000
+    log = logger.warning if response.status_code >= 400 else logger.info
+    log(
+        "rid=%s %s %s ?%s -> %s (%.0f ms)",
+        request_id, request.method, request.url.path, query,
+        response.status_code, elapsed,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
-# =========================================================
-# ROOT / HEALTH
-# =========================================================
-
-@app.get("/")
-async def root():
-    return {
-        "status": "ok",
-        "service": "MACANALIZ PRO API",
-        "bet365_only": True,
-        "api": "API-Football",
-    }
+# ==========================================================================
+# Hata yakalayicilar - ham traceback asla kullaniciya gitmez
+# ==========================================================================
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    logger.warning("%s -> %s (%s)", request.url.path, exc.code, exc.detail)
+    status = exc.http_status if exc.http_status >= 400 else 400
+    return JSONResponse(status_code=status, content=exc.to_payload())
 
 
-@app.get("/api/health")
-async def health():
-    return {
-        "status": "ok",
-        "backend": True,
-        "bet365_only": True,
-        "api_key_configured": bool(
-            os.getenv("API_FOOTBALL_KEY", "").strip()
+@app.exception_handler(StarletteHTTPException)
+async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """404/405 gibi hatalar da ayni zarfla doner.
+
+    Aksi halde FastAPI {"detail": "Not Found"} donduruyor ve frontend'de
+    mesaj bulunamadigi icin "Sunucu 404 dondurdu" gibi bos bir metin
+    goruluyordu - gercek sebep kayboluyordu.
+    """
+    messages = {
+        404: (
+            f"Bu backend '{request.url.path}' adresini tanimiyor. "
+            "Adres yanlis olabilir ya da bu sunucuda BASKA bir uygulama calisiyor."
         ),
-        "time": datetime.utcnow().isoformat(),
+        405: f"'{request.method}' metodu bu adres icin desteklenmiyor.",
     }
-
-
-# =========================================================
-# API STATUS
-# =========================================================
-
-@app.get("/api/status")
-async def api_status():
-    """
-    API-Football hesap durumunu kontrol eder.
-    """
-
-    data = await api_get("/status")
-
-    return {
-        "connected": True,
-        "status": data,
-    }
-
-
-# =========================================================
-# BET365 BOOKMAKER
-# =========================================================
-
-async def find_bet365():
-    global bookmaker_cache
-    global bookmaker_cache_time
-
-    now = datetime.utcnow()
-
-    if (
-        bookmaker_cache
-        and bookmaker_cache_time
-        and (now - bookmaker_cache_time).total_seconds() < 86400
-    ):
-        return bookmaker_cache
-
-    data = await api_get("/odds/bookmakers")
-
-    bookmakers = data.get("response") or []
-
-    bet365 = None
-
-    for bookmaker in bookmakers:
-        name = str(bookmaker.get("name", "")).strip().lower()
-
-        if name == "bet365":
-            bet365 = bookmaker
-            break
-
-    if bet365 is None:
-        for bookmaker in bookmakers:
-            name = str(bookmaker.get("name", "")).strip().lower()
-
-            if "bet365" in name:
-                bet365 = bookmaker
-                break
-
-    if bet365 is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Bet365 API-Football hesabında bulunamadı. "
-                "Bu durumda başka bookmaker kullanılmayacaktır."
-            ),
-        )
-
-    bookmaker_cache = {
-        "id": bet365.get("id"),
-        "name": bet365.get("name", BET365_NAME),
-    }
-
-    bookmaker_cache_time = now
-
-    return bookmaker_cache
-
-
-@app.get("/api/bet365")
-async def bet365():
-    bookmaker = await find_bet365()
-
-    return {
-        "connected": True,
-        "bookmaker": bookmaker,
-        "bet365_only": True,
-    }
-
-
-# =========================================================
-# SEASON BULMA
-# =========================================================
-
-async def get_available_seasons(league_id: int):
-    data = await api_get(
-        "/leagues",
-        {
-            "id": league_id,
+    message = messages.get(exc.status_code, str(exc.detail))
+    logger.warning("%s %s -> HTTP %s", request.method, request.url.path, exc.status_code)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": f"http_{exc.status_code}",
+                "message": message,
+                "path": request.url.path,
+                "expected_contract": API_CONTRACT,
+            }
         },
     )
 
-    response = data.get("response") or []
 
-    if not response:
-        return []
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """FastAPI'nin 422'si de anlasilir bir mesaja cevrilir."""
+    problems = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error.get("loc", []) if part != "query")
+        problems.append(f"{location or 'parametre'}: {error.get('msg', 'gecersiz')}")
+    message = "Gonderilen parametreler gecersiz. " + "; ".join(problems[:4])
+    logger.warning("%s %s -> 422 %s", request.method, request.url.path, problems)
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "validation_error", "message": message,
+                           "problems": problems}},
+    )
 
-    seasons = response[0].get("seasons") or []
 
-    result = []
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Beklenmeyen hata: %s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "internal_error",
+                "message": "Beklenmeyen bir hata olustu. Sunucu loglarina bakin.",
+            }
+        },
+    )
 
-    for season in seasons:
-        year = season.get("year")
 
-        if year is not None:
+# ==========================================================================
+# Parametre dogrulama
+# ==========================================================================
+def parse_league_ids(raw: str | None, settings: Settings) -> list[int]:
+    if not raw or not raw.strip() or raw.strip().lower() in {"all", "tum", "tumu"}:
+        return settings.league_ids
+    result: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if not token.lstrip("-").isdigit():
+            raise ValidationError(f"Gecersiz lig ID'si: {token}")
+        value = int(token)
+        if value <= 0:
+            raise ValidationError(f"Gecersiz lig ID'si: {token}")
+        result.append(value)
+    if not result:
+        raise ValidationError("En az bir lig secilmeli.")
+    if len(result) > 20:
+        raise ValidationError("En fazla 20 lig secilebilir.")
+    return result
+
+
+def parse_range(
+    days: int | None, date_from: str | None, date_to: str | None, settings: Settings
+) -> tuple[date, date]:
+    if date_from or date_to:
+        try:
+            start = date.fromisoformat(date_from) if date_from else datetime.now(tz=settings.tzinfo).date()
+            end = date.fromisoformat(date_to) if date_to else start
+        except ValueError as exc:
+            raise ValidationError("Tarih formati gecersiz. YYYY-AA-GG bekleniyor.") from exc
+        if end < start:
+            raise ValidationError("Bitis tarihi baslangictan once olamaz.")
+        if (end - start).days + 1 > MAX_RANGE_DAYS:
+            raise ValidationError(f"Tarih araligi en fazla {MAX_RANGE_DAYS} gun olabilir.")
+        return start, end
+
+    span = days if days is not None else 1
+    if span < 1 or span > MAX_RANGE_DAYS:
+        raise ValidationError(f"Gun araligi 1 ile {MAX_RANGE_DAYS} arasinda olmali.")
+    return default_date_range(span, settings)
+
+
+def quota_info(client: ApiFootballClient, note: str | None = None) -> QuotaInfo:
+    return QuotaInfo(**client.quota.as_dict(note))
+
+
+# ==========================================================================
+# Saglik ve durum
+# ==========================================================================
+@app.get("/api/health")
+async def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "time": datetime.now(tz=get_settings().tzinfo).isoformat(),
+    }
+
+
+@app.get("/api/config")
+async def read_config(settings: Settings = Depends(settings_dep)) -> dict[str, Any]:
+    """Frontend'in ihtiyac duydugu yapilandirma. SIR ICERMEZ."""
+    return {
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        # Frontend'in "bu adreste DOGRU backend mi var?" sorusunu
+        # tahminle degil, acik bir isaretle cevaplamasi icin.
+        "api_contract": API_CONTRACT,
+        "timezone": settings.timezone_name,
+        "bookmaker_name": settings.bookmaker_name,
+        "leagues": [
+            {"id": league.id, "slug": league.slug, "name": league.expected_name}
+            for league in settings.leagues
+        ],
+        "day_options": [1, 2, 3, 7, 14],
+        "top5_size": settings.top5_size,
+        "snapshot_interval_minutes": settings.snapshot_interval_minutes,
+        "max_range_days": MAX_RANGE_DAYS,
+        "disclaimer": (
+            "Bu uygulama kazanc garantisi vermez, kesin sonuc iddia etmez ve "
+            "veri uydurmaz. Gosterilen olasiliklar istatistiksel bir modelin "
+            "ciktisidir."
+        ),
+    }
+
+
+@app.get("/api/status", response_model=StatusResponse)
+async def read_status(request: Request) -> StatusResponse:
+    """Bagli mi, anahtar var mi, Bet365 bulundu mu - hepsi ayri ayri.
+
+    API ANAHTARININ KENDISI BU CEVAPTA ASLA YER ALMAZ.
+    """
+    state = request.app.state
+    settings: Settings = state.settings
+    client: ApiFootballClient = state.client
+    database: Database = state.database
+    resolver: BookmakerResolver = state.resolver
+    scheduler: SnapshotScheduler = state.scheduler
+
+    checks: list[dict[str, Any]] = [
+        {"key": "backend", "label": "Backend", "ok": True, "detail": "Calisiyor"}
+    ]
+    warnings: list[str] = []
+
+    api_connected = False
+    bet365_available = False
+    bookmaker_id: int | None = None
+    leagues_info: list[dict[str, Any]] = []
+
+    if not settings.api_key_configured:
+        checks.append(
+            {
+                "key": "api_key",
+                "label": "API anahtari",
+                "ok": False,
+                "detail": "API_FOOTBALL_KEY tanimli degil",
+            }
+        )
+        warnings.append("Sunucuda API_FOOTBALL_KEY tanimli degil.")
+    else:
+        checks.append(
+            {"key": "api_key", "label": "API anahtari", "ok": True, "detail": "Tanimli"}
+        )
+        budget = CallBudget(limit=12)
+        try:
+            bookmaker, error = await resolver.try_resolve(budget=budget)
+            api_connected = True
+            checks.append(
+                {
+                    "key": "api",
+                    "label": "API-Football baglantisi",
+                    "ok": True,
+                    "detail": "Basarili",
+                }
+            )
+            if bookmaker is not None:
+                bet365_available = True
+                bookmaker_id = bookmaker.id
+                checks.append(
+                    {
+                        "key": "bookmaker",
+                        "label": settings.bookmaker_name,
+                        "ok": True,
+                        "detail": f"Bulundu (id={bookmaker.id})",
+                    }
+                )
+            else:
+                checks.append(
+                    {
+                        "key": "bookmaker",
+                        "label": settings.bookmaker_name,
+                        "ok": False,
+                        "detail": error or "Bulunamadi",
+                    }
+                )
+                warnings.append(error or f"{settings.bookmaker_name} bulunamadi.")
+        except AppError as exc:
+            checks.append(
+                {
+                    "key": "api",
+                    "label": "API-Football baglantisi",
+                    "ok": False,
+                    "detail": exc.user_message,
+                }
+            )
+            warnings.append(exc.user_message)
+
+        # Lig ID'lerini gercek API adiyla dogrula (yanlis ID sessiz kalmasin)
+        for league in settings.leagues:
             try:
-                result.append(int(year))
-            except Exception:
-                pass
+                context = await state.service.league_context(league.id, budget=budget)
+                leagues_info.append(
+                    {
+                        "id": league.id,
+                        "name": context.name,
+                        "season": context.season,
+                        "ok": context.usable and not context.warning,
+                        "warning": context.warning,
+                    }
+                )
+                if context.warning:
+                    warnings.append(context.warning)
+            except AppError as exc:
+                leagues_info.append(
+                    {"id": league.id, "name": league.expected_name, "ok": False,
+                     "warning": exc.user_message}
+                )
 
-    return sorted(set(result), reverse=True)
+    # ---------------------------------------------------------------- plan
+    # Ucretsiz planlar guncel sezona erisim vermiyor. Bunu ACIKCA raporla ki
+    # kullanici "mac yok" ile "plan izin vermiyor" arasindaki farki gorsun.
+    plan = PlanAccess()
+    first_usable = next(
+        (row for row in leagues_info if row.get("season") and row.get("ok") is not False),
+        None,
+    )
+    if settings.api_key_configured and first_usable:
+        season = int(first_usable["season"])
+        league_id = int(first_usable["id"])
+        candidates = [season, season - 1, season - 2, season - 3]
+        try:
+            access = await client.newest_accessible_season(
+                league_id, candidates, budget=CallBudget(limit=8)
+            )
+            newest = access.get("newest_accessible_season")
+            plan = PlanAccess(
+                checked=True,
+                season_access_ok=(newest == season),
+                requested_season=season,
+                league_id=league_id,
+                provider_message=access.get("provider_message"),
+                newest_accessible_season=newest,
+                tried=access.get("tried") or [],
+            )
+            if plan.season_access_ok:
+                plan.note = f"{season} sezonuna erisim var."
+                checks.append({
+                    "key": "plan", "label": "Plan / sezon erisimi", "ok": True,
+                    "detail": f"{season} sezonu erisilebilir",
+                })
+            else:
+                plan.note = (
+                    "Guncel sezon verisi bu planla cekilemez. Uygulama eski sezonu "
+                    "'bugunun maclari' olarak GOSTERMEZ. Plan yukseltilirse kod "
+                    "degisikligi gerekmez; sezon her zaman API'den tespit edilir."
+                )
+                detail = f"{season} sezonuna erisim YOK"
+                if newest:
+                    detail += f" (erisilebilen en guncel sezon: {newest})"
+                checks.append({
+                    "key": "plan", "label": "Plan / sezon erisimi", "ok": False,
+                    "detail": detail,
+                })
+                warnings.append(
+                    f"API-Football planiniz {season} sezonuna erisim vermiyor"
+                    + (f"; erisilebilen en guncel sezon {newest}." if newest else ".")
+                )
+                if access.get("provider_message"):
+                    warnings.append(f"Saglayici mesaji: {access['provider_message']}")
+        except AppError as exc:
+            plan = PlanAccess(checked=True, requested_season=season, league_id=league_id,
+                              note=exc.user_message)
+            checks.append({"key": "plan", "label": "Plan / sezon erisimi",
+                           "ok": False, "detail": exc.user_message})
+
+    stats = {"total": None, "last_at": None}
+    try:
+        stats = database.snapshot_stats()
+    except AppError:
+        warnings.append("Snapshot istatistikleri okunamadi.")
+
+    if not database.persistent:
+        warnings.append(
+            "Veritabani kalici degil (SQLite). Sunucu yeniden baslarsa snapshot "
+            "gecmisi silinir. Kalici gecmis icin DATABASE_URL tanimlayin."
+        )
+
+    checks.append(
+        {
+            "key": "database",
+            "label": "Veritabani",
+            "ok": True,
+            "detail": f"{database.describe()} - {'kalici' if database.persistent else 'GECICI'}",
+        }
+    )
+    checks.append(
+        {
+            "key": "scheduler",
+            "label": "Snapshot toplayici",
+            "ok": scheduler.running,
+            "detail": "Calisiyor" if scheduler.running else "Durdu / kapali",
+        }
+    )
+
+    return StatusResponse(
+        backend="ok",
+        version=APP_VERSION,
+        api_key_configured=settings.api_key_configured,
+        api_connected=api_connected,
+        bet365_available=bet365_available,
+        bookmaker_id=bookmaker_id,
+        database=database.describe(),
+        database_persistent=database.persistent,
+        snapshot_count=stats.get("total"),
+        last_snapshot_at=stats.get("last_at"),
+        scheduler_running=scheduler.running,
+        quota=quota_info(client),
+        timezone=settings.timezone_name,
+        plan=plan,
+        leagues=leagues_info,
+        warnings=warnings,
+        # Bu alan unutulmustu: frontend'deki "Bağlantı Durumu" paneli bunu
+        # kullaniyor, gecmedigi icin panel bos kaliyordu.
+        checks=checks,
+    )
 
 
-async def choose_season(league_id: int, requested: Optional[int]):
-    seasons = await get_available_seasons(league_id)
-
-    if not seasons:
-        return requested
-
-    if requested is not None and requested in seasons:
-        return requested
-
-    current_year = date.today().year
-
-    # Önce mevcut yılı dene.
-    if current_year in seasons:
-        return current_year
-
-    # Son erişilebilir sezonu kullan.
-    return seasons[0]
+@app.get("/api/quota")
+async def read_quota(client: ApiFootballClient = Depends(get_client)) -> dict[str, Any]:
+    return client.quota.as_dict(
+        "Degerler API-Football cevap header'larindan okunur; hic cagri yapilmadiysa bilinmez."
+    )
 
 
-# =========================================================
-# FIXTURES
-# =========================================================
+@app.get("/api/capabilities")
+async def read_capabilities(request: Request) -> dict[str, Any]:
+    """Bu anahtarla gercekten NE yapilabildigini olcer (varsayim degil)."""
+    state = request.app.state
+    settings: Settings = state.settings
+    resolver: BookmakerResolver = state.resolver
+
+    result: dict[str, Any] = {
+        "api_key_configured": settings.api_key_configured,
+        "bookmaker_wanted": settings.bookmaker_name,
+        "bookmaker_found": False,
+        "bookmaker_id": None,
+        "bookmaker_count": 0,
+        "markets_detected": [],
+        "note": None,
+    }
+    if not settings.api_key_configured:
+        result["note"] = "API anahtari tanimli olmadan yetenek testi yapilamaz."
+        return result
+
+    budget = CallBudget(limit=6)
+    # Teshis endpointi: fatal hatada bile 200 dondurup nedeni yazar.
+    try:
+        bookmaker, error = await resolver.try_resolve(budget=budget)
+    except AppError as exc:
+        result["note"] = exc.user_message
+        return result
+    result["bookmaker_count"] = len(resolver.known_bookmakers())
+    if bookmaker is None:
+        result["note"] = error
+        return result
+
+    result["bookmaker_found"] = True
+    result["bookmaker_id"] = bookmaker.id
+    result["note"] = (
+        "Hangi marketlerin geldigi maca gore degisir; mac detayinda gercek "
+        "market listesi gosterilir."
+    )
+    return result
+
+
+@app.get("/api/bookmakers")
+async def read_bookmakers(request: Request) -> dict[str, Any]:
+    state = request.app.state
+    resolver: BookmakerResolver = state.resolver
+    budget = CallBudget(limit=4)
+    # Teshis endpointi: fatal hatada bile 200 dondurup nedeni yazar.
+    try:
+        bookmaker, error = await resolver.try_resolve(budget=budget)
+    except AppError as exc:
+        bookmaker, error = None, exc.user_message
+    return {
+        "wanted": state.settings.bookmaker_name,
+        "found": bookmaker.__dict__ if bookmaker else None,
+        "error": error,
+        "all": [item.__dict__ for item in resolver.known_bookmakers()],
+    }
+
+
+@app.get("/api/leagues")
+async def read_leagues(request: Request) -> dict[str, Any]:
+    state = request.app.state
+    settings: Settings = state.settings
+    budget = CallBudget(limit=12)
+    leagues: list[dict[str, Any]] = []
+    for league in settings.leagues:
+        try:
+            context = await state.service.league_context(league.id, budget=budget)
+            leagues.append(
+                {
+                    "id": league.id,
+                    "slug": league.slug,
+                    "name": context.name,
+                    "country": context.country,
+                    "logo": context.logo,
+                    "season": context.season,
+                    "warning": context.warning,
+                }
+            )
+        except AppError as exc:
+            leagues.append(
+                {
+                    "id": league.id,
+                    "slug": league.slug,
+                    "name": league.expected_name,
+                    "season": None,
+                    "warning": exc.user_message,
+                }
+            )
+    return {"leagues": leagues}
+
+
+# ==========================================================================
+# Maclar
+# ==========================================================================
+async def _load_matches(
+    request: Request, leagues: str | None, days: int | None, date_from: str | None, date_to: str | None
+):
+    settings: Settings = request.app.state.settings
+    service: MatchService = request.app.state.service
+    league_ids = parse_league_ids(leagues, settings)
+    start, end = parse_range(days, date_from, date_to, settings)
+    summaries, analyses, budget, warnings, bookmaker = await service.list_matches(
+        league_ids, start, end
+    )
+    return summaries, analyses, budget, warnings, bookmaker, league_ids, start, end
+
+
+@app.get("/api/matches", response_model=MatchesResponse)
+async def read_matches(
+    request: Request,
+    leagues: str | None = Query(None, description="Virgulle ayrilmis lig ID'leri, bos = hepsi"),
+    days: int | None = Query(None, ge=1, le=MAX_RANGE_DAYS),
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+) -> MatchesResponse:
+    settings: Settings = request.app.state.settings
+    client: ApiFootballClient = request.app.state.client
+    summaries, _, budget, warnings, _, league_ids, start, end = await _load_matches(
+        request, leagues, days, date_from, date_to
+    )
+    with_odds = sum(1 for item in summaries if item.bet365.available)
+    analyzed = sum(1 for item in summaries if item.analyzed)
+    return MatchesResponse(
+        generated_at=datetime.now(tz=settings.tzinfo),
+        timezone=settings.timezone_name,
+        filters={
+            "leagues": league_ids,
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+        },
+        counts={
+            "total": len(summaries),
+            "with_bet365_odds": with_odds,
+            "analyzed": analyzed,
+            "api_calls": budget.used,
+        },
+        matches=summaries,
+        quota=quota_info(client),
+        warnings=warnings,
+    )
+
 
 @app.get("/api/fixtures")
-async def fixtures(
-    ids: str = Query(DEFAULT_LEAGUES),
-    days: int = Query(7, ge=1, le=14),
-    season: Optional[int] = Query(None),
-    include_past: bool = Query(False),
-):
-    """
-    Yaklaşan maçları getirir.
-
-    include_past=false:
-        Bugün -> sonraki N gün
-
-    include_past=true:
-        Son 7 gün -> sonraki N gün
-
-    Böylece geçmiş maçlar da analiz ekranına girebilir.
-    """
-
-    try:
-        league_ids = [
-            int(x.strip())
-            for x in ids.split(",")
-            if x.strip()
-        ]
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Lig ID listesi hatalı.",
-        )
-
-    if not league_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="En az bir lig ID girilmelidir.",
-        )
-
-    today = date.today()
-
-    if include_past:
-        start_date = today - timedelta(days=7)
-    else:
-        start_date = today
-
-    end_date = today + timedelta(days=days)
-
-    all_fixtures = []
-    errors = []
-
-    # API kotasını gereksiz tüketmemek için
-    # aynı anda sınırlı sayıda istek.
-    semaphore = asyncio.Semaphore(3)
-
-    async def load_league(league_id):
-        async with semaphore:
-            try:
-                selected_season = await choose_season(
-                    league_id,
-                    season,
-                )
-
-                params = {
-                    "league": league_id,
-                    "from": start_date.isoformat(),
-                    "to": end_date.isoformat(),
-                    "timezone": "Europe/Istanbul",
-                }
-
-                if selected_season is not None:
-                    params["season"] = selected_season
-
-                data = await api_get(
-                    "/fixtures",
-                    params,
-                )
-
-                return {
-                    "league_id": league_id,
-                    "season": selected_season,
-                    "fixtures": data.get("response") or [],
-                    "error": None,
-                }
-
-            except HTTPException as exc:
-                return {
-                    "league_id": league_id,
-                    "season": None,
-                    "fixtures": [],
-                    "error": str(exc.detail),
-                }
-
-            except Exception as exc:
-                return {
-                    "league_id": league_id,
-                    "season": None,
-                    "fixtures": [],
-                    "error": str(exc),
-                }
-
-    results = await asyncio.gather(
-        *[
-            load_league(league_id)
-            for league_id in league_ids
-        ]
+async def read_fixtures(
+    request: Request,
+    leagues: str | None = Query(None),
+    days: int | None = Query(None, ge=1, le=MAX_RANGE_DAYS),
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+) -> dict[str, Any]:
+    """Analiz yapmadan sadece fikstur listesi (hafif)."""
+    summaries, _, budget, warnings, _, league_ids, start, end = await _load_matches(
+        request, leagues, days, date_from, date_to
     )
-
-    for result in results:
-        all_fixtures.extend(result["fixtures"])
-
-        if result["error"]:
-            errors.append(
-                {
-                    "league_id": result["league_id"],
-                    "season": result["season"],
-                    "error": result["error"],
-                }
-            )
-
-    # Duplicate fixture temizliği
-    unique = {}
-
-    for fixture in all_fixtures:
-        fixture_id = (
-            fixture.get("fixture", {})
-            .get("id")
-        )
-
-        if fixture_id:
-            unique[fixture_id] = fixture
-
-    fixtures_list = list(unique.values())
-
-    # Tarihe göre sırala
-    fixtures_list.sort(
-        key=lambda x: (
-            x.get("fixture", {})
-            .get("timestamp", 0)
-        )
-    )
-
     return {
-        "live": True,
-        "bet365_only": True,
-        "count": len(fixtures_list),
-        "from": start_date.isoformat(),
-        "to": end_date.isoformat(),
-        "fixtures": fixtures_list,
-        "errors": errors,
+        "filters": {"leagues": league_ids, "from": start.isoformat(), "to": end.isoformat()},
+        "count": len(summaries),
+        "api_calls": budget.used,
+        "warnings": warnings,
+        "fixtures": [
+            {
+                "fixture_id": item.fixture_id,
+                "league": item.league.name,
+                "home": item.home.name,
+                "away": item.away.name,
+                "kickoff": item.kickoff.display,
+                "status": item.status_short,
+                "bet365": item.bet365.available,
+            }
+            for item in summaries
+        ],
     }
 
 
-# =========================================================
-# MATCH WINNER / MS 1-X-2
-# =========================================================
-
-def extract_match_winner(bookmaker):
-    bets = bookmaker.get("bets") or []
-
-    for bet in bets:
-        market_name = str(
-            bet.get("name", "")
-        ).strip().lower()
-
-        if not (
-            "match winner" in market_name
-            or market_name in (
-                "1x2",
-                "fulltime result",
-            )
-        ):
-            continue
-
-        result = {
-            "home": None,
-            "draw": None,
-            "away": None,
-        }
-
-        for value in bet.get("values") or []:
-            odd_raw = value.get("odd")
-
-            try:
-                odd = float(odd_raw)
-            except (TypeError, ValueError):
-                continue
-
-            label = str(
-                value.get("value", "")
-            ).strip().lower()
-
-            if label in ("home", "1"):
-                result["home"] = odd
-
-            elif label in ("draw", "x"):
-                result["draw"] = odd
-
-            elif label in ("away", "2"):
-                result["away"] = odd
-
-        if all(
-            result[x] is not None
-            for x in ("home", "draw", "away")
-        ):
-            return result
-
-    return None
-
-
-# =========================================================
-# TÜM BET365 MARKETLERİ
-# =========================================================
-
-def extract_markets(bookmaker):
-    markets = {}
-
-    for bet in bookmaker.get("bets") or []:
-        name = str(
-            bet.get("name", "")
-        ).strip()
-
-        if not name:
-            continue
-
-        values = []
-
-        for value in bet.get("values") or []:
-            odd = value.get("odd")
-
-            try:
-                odd = float(odd)
-            except (TypeError, ValueError):
-                continue
-
-            values.append(
-                {
-                    "value": value.get("value"),
-                    "odd": odd,
-                }
-            )
-
-        if values:
-            markets[name] = values
-
-    return markets
-
-
-# =========================================================
-# ODDS
-# =========================================================
-
-@app.get("/api/odds")
-async def odds(
-    fixture: int = Query(..., ge=1)
-):
-    bookmaker = await find_bet365()
-
-    data = await api_get(
-        "/odds",
-        {
-            "fixture": fixture,
-            "bookmaker": bookmaker["id"],
-        },
+@app.get("/api/top5", response_model=Top5Response)
+async def read_top5(
+    request: Request,
+    leagues: str | None = Query(None),
+    days: int | None = Query(None, ge=1, le=MAX_RANGE_DAYS),
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+) -> Top5Response:
+    settings: Settings = request.app.state.settings
+    service: MatchService = request.app.state.service
+    _, analyses, _, warnings, _, _, _, _ = await _load_matches(
+        request, leagues, days, date_from, date_to
+    )
+    top, excluded = service.top_matches(analyses)
+    return Top5Response(
+        generated_at=datetime.now(tz=settings.tzinfo),
+        criteria=(
+            "Siralama: (model/piyasa farki) x (guven skoru). Yalnizca Bet365 orani "
+            "olan, model calistirilabilen ve veri kalitesi esigini gecen maclar."
+        ),
+        matches=top,
+        excluded_counts=excluded,
+        warnings=warnings,
     )
 
-    response = data.get("response") or []
 
-    if not response:
+@app.get("/api/highlights")
+async def read_highlights(
+    request: Request,
+    leagues: str | None = Query(None),
+    days: int | None = Query(None, ge=1, le=MAX_RANGE_DAYS),
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+) -> dict[str, Any]:
+    summaries, _, _, warnings, _, _, _, _ = await _load_matches(
+        request, leagues, days, date_from, date_to
+    )
+    cards: Sequence[HighlightCard] = build_highlights(summaries)
+    return {"cards": [card.model_dump() for card in cards], "warnings": warnings}
+
+
+# ==========================================================================
+# Tek mac
+# ==========================================================================
+@app.get("/api/match/{fixture_id}", response_model=MatchDetail)
+async def read_match(fixture_id: int, service: MatchService = Depends(get_service)) -> MatchDetail:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    return await service.match_detail(fixture_id)
+
+
+@app.get("/api/analysis/{fixture_id}", response_model=MatchDetail)
+async def read_analysis(fixture_id: int, service: MatchService = Depends(get_service)) -> MatchDetail:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    return await service.match_detail(fixture_id)
+
+
+@app.get("/api/odds/{fixture_id}")
+async def read_odds(fixture_id: int, request: Request) -> dict[str, Any]:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    detail = await request.app.state.service.match_detail(fixture_id)
+    return {
+        "fixture_id": fixture_id,
+        "bet365": detail.bet365.model_dump(),
+        "implied": detail.implied.model_dump(),
+        "odds_movement": detail.odds_movement.model_dump(),
+    }
+
+
+@app.get("/api/predictions/{fixture_id}")
+async def read_predictions(fixture_id: int, request: Request) -> dict[str, Any]:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    detail = await request.app.state.service.match_detail(fixture_id)
+    return {
+        "fixture_id": fixture_id,
+        "model": detail.model.model_dump(),
+        "api_prediction": detail.api_prediction.model_dump(),
+        "value": detail.value.model_dump(),
+    }
+
+
+@app.get("/api/form/{fixture_id}")
+async def read_form(fixture_id: int, request: Request) -> dict[str, Any]:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    detail = await request.app.state.service.match_detail(fixture_id)
+    return {
+        "fixture_id": fixture_id,
+        "home": {"team": detail.home.model_dump(), "form": detail.home_form.model_dump(),
+                 "venue": detail.home_venue.model_dump()},
+        "away": {"team": detail.away.model_dump(), "form": detail.away_form.model_dump(),
+                 "venue": detail.away_venue.model_dump()},
+    }
+
+
+@app.get("/api/h2h/{fixture_id}")
+async def read_h2h(fixture_id: int, request: Request) -> dict[str, Any]:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    detail = await request.app.state.service.match_detail(fixture_id)
+    return {"fixture_id": fixture_id, "h2h": detail.h2h.model_dump()}
+
+
+# ==========================================================================
+# Snapshot
+# ==========================================================================
+@app.get("/api/snapshots/{fixture_id}")
+async def read_snapshots(fixture_id: int, request: Request) -> dict[str, Any]:
+    if fixture_id <= 0:
+        raise ValidationError("Gecersiz mac ID'si.")
+    database: Database = request.app.state.database
+    rows = load_snapshots(database, fixture_id)
+    return {
+        "fixture_id": fixture_id,
+        "persistent_storage": database.persistent,
+        "count": len(rows),
+        "note": (
+            None
+            if rows
+            else "Bu mac icin kaydedilmis Bet365 oran snapshot'i bulunmuyor. "
+            "Gecmis oran uydurulmaz."
+        ),
+        "snapshots": [
+            {
+                "captured_at": row.get("captured_at"),
+                "bookmaker": row.get("bookmaker_name"),
+                "market": row.get("market"),
+                "1": row.get("home_odds"),
+                "X": row.get("draw_odds"),
+                "2": row.get("away_odds"),
+                "source": row.get("source"),
+            }
+            for row in rows
+        ],
+    }
+
+
+@app.post("/api/snapshots/capture")
+async def capture_snapshots(request: Request) -> dict[str, Any]:
+    """Snapshot turunu elle tetikler (zamanlayicinin yaptigi isin aynisi)."""
+    scheduler: SnapshotScheduler = request.app.state.scheduler
+    result = await scheduler.run_once()
+    scheduler.last_run_at = datetime.now(tz=request.app.state.settings.tzinfo)
+    scheduler.last_result = result
+    return result
+
+
+@app.get("/api/calibration")
+async def read_calibration(request: Request) -> dict[str, Any]:
+    """Model kalibrasyonu: gecmis tahminler gercek sonuclarla karsilastirilir.
+
+    Yeterli sonuclanmis mac yoksa sayi uretilmez.
+    """
+    database: Database = request.app.state.database
+    rows = database.calibration_rows(limit=1000)
+    if len(rows) < 20:
         return {
             "available": False,
-            "fixture_id": fixture,
-            "bookmaker": BET365_NAME,
-            "bookmaker_id": bookmaker["id"],
-            "odds": None,
-            "markets": {},
-            "update": None,
-            "message": (
-                "Bu maç için API-Football "
-                "üzerinde Bet365 oranı bulunamadı."
+            "settled_matches": len(rows),
+            "note": (
+                f"Kalibrasyon icin yeterli sonuclanmis tahmin yok ({len(rows)}/20). "
+                "Maclar oynandikca bu rapor dolacak."
             ),
         }
 
-    for row in response:
-        for bm in row.get("bookmakers") or []:
-
-            if "bet365" not in str(
-                bm.get("name", "")
-            ).lower():
-                continue
-
-            match_winner = extract_match_winner(bm)
-            markets = extract_markets(bm)
-
-            # T-15 snapshot
-            now = datetime.utcnow()
-
-            snapshots = odds_snapshots.setdefault(
-                fixture,
-                [],
-            )
-
-            snapshot = {
-                "time": now.isoformat(),
-                "odds": match_winner,
-            }
-
-            if match_winner:
-                if not snapshots or (
-                    snapshots[-1].get("odds")
-                    != match_winner
-                ):
-                    snapshots.append(snapshot)
-
-            # Son 20 snapshot yeterli
-            odds_snapshots[fixture] = snapshots[-20:]
-
-            return {
-                "available": match_winner is not None,
-                "fixture_id": fixture,
-                "bookmaker": bm.get(
-                    "name",
-                    BET365_NAME,
-                ),
-                "bookmaker_id": bm.get(
-                    "id",
-                    bookmaker["id"],
-                ),
-                "odds": match_winner,
-                "markets": markets,
-                "update": bm.get("update"),
-                "snapshots": odds_snapshots.get(
-                    fixture,
-                    [],
-                ),
-            }
-
-    return {
-        "available": False,
-        "fixture_id": fixture,
-        "bookmaker": BET365_NAME,
-        "bookmaker_id": bookmaker["id"],
-        "odds": None,
-        "markets": {},
-        "update": None,
-        "snapshots": odds_snapshots.get(
-            fixture,
-            [],
-        ),
-    }
-
-
-# =========================================================
-# PREDICTION
-# =========================================================
-
-@app.get("/api/prediction")
-async def prediction(
-    fixture: int = Query(..., ge=1)
-):
-    """
-    API-Football'un kendi prediction endpointini kullanır.
-    """
-
-    data = await api_get(
-        "/predictions",
-        {
-            "fixture": fixture,
-        },
-    )
-
-    response = data.get("response") or []
-
-    if not response:
-        return {
-            "available": False,
-            "fixture_id": fixture,
-            "prediction": None,
+    hits = 0
+    brier_sum = 0.0
+    for row in rows:
+        home_goals = row.get("actual_home_goals")
+        away_goals = row.get("actual_away_goals")
+        if home_goals is None or away_goals is None:
+            continue
+        actual = "1" if home_goals > away_goals else ("X" if home_goals == away_goals else "2")
+        probabilities = {
+            "1": float(row.get("model_home") or 0),
+            "X": float(row.get("model_draw") or 0),
+            "2": float(row.get("model_away") or 0),
         }
+        predicted = max(probabilities, key=lambda key: probabilities[key])
+        if predicted == actual:
+            hits += 1
+        for key, value in probabilities.items():
+            brier_sum += (value - (1.0 if key == actual else 0.0)) ** 2
 
-    item = response[0]
-
-    prediction_data = item.get(
-        "predictions"
-    ) or {}
-
-    teams = item.get("teams") or {}
-
+    total = len(rows)
     return {
         "available": True,
-        "fixture_id": fixture,
-        "teams": teams,
-        "prediction": prediction_data,
-    }
-
-
-# =========================================================
-# MAÇ DETAY ANALİZİ
-# =========================================================
-
-@app.get("/api/match")
-async def match_analysis(
-    fixture: int = Query(..., ge=1)
-):
-    """
-    Frontend tek çağrıyla:
-    - maç
-    - Bet365 oranı
-    - prediction
-    alabilsin.
-    """
-
-    fixture_data = await api_get(
-        "/fixtures",
-        {
-            "id": fixture,
-        },
-    )
-
-    fixtures_data = (
-        fixture_data.get("response")
-        or []
-    )
-
-    if not fixtures_data:
-        raise HTTPException(
-            status_code=404,
-            detail="Maç bulunamadı.",
-        )
-
-    fixture_item = fixtures_data[0]
-
-    # Odds
-    odds_data = await odds(fixture)
-
-    # Prediction
-    try:
-        prediction_data = await prediction(
-            fixture
-        )
-    except HTTPException as exc:
-        prediction_data = {
-            "available": False,
-            "fixture_id": fixture,
-            "prediction": None,
-            "error": str(exc.detail),
-        }
-
-    return {
-        "fixture": fixture_item,
-        "bet365": odds_data,
-        "prediction": prediction_data,
-        "bet365_only": True,
-    }
-
-
-# =========================================================
-# TOP 5 ANALİZ
-# =========================================================
-
-def calculate_market_probability(
-    home,
-    draw,
-    away,
-):
-    values = [
-        x for x in (home, draw, away)
-        if isinstance(x, (int, float))
-        and x > 0
-    ]
-
-    if not values:
-        return None
-
-    inverse = [
-        1 / x for x in values
-    ]
-
-    total = sum(inverse)
-
-    if total <= 0:
-        return None
-
-    return [
-        round((x / total) * 100, 2)
-        for x in inverse
-    ]
-
-
-@app.get("/api/analyze")
-async def analyze(
-    ids: str = Query(DEFAULT_LEAGUES),
-    days: int = Query(7, ge=1, le=14),
-    season: Optional[int] = Query(None),
-):
-    """
-    Ana ekran için:
-    maçları getirir,
-    Bet365 oranlarını kontrol eder,
-    MS olasılıklarını hesaplar,
-    en güçlü ilk 5'i döndürür.
-
-    Bet365 oranı olmayan maçlar
-    öneri sıralamasına alınmaz.
-    """
-
-    fixture_response = await fixtures(
-        ids=ids,
-        days=days,
-        season=season,
-        include_past=False,
-    )
-
-    fixture_list = (
-        fixture_response.get("fixtures")
-        or []
-    )
-
-    analyzed = []
-
-    # API kotasını korumak için maksimum 15 maç
-    # üzerinde odds çağrısı.
-    for fixture in fixture_list[:15]:
-
-        fixture_id = (
-            fixture.get("fixture", {})
-            .get("id")
-        )
-
-        if not fixture_id:
-            continue
-
-        try:
-            odds_data = await odds(
-                int(fixture_id)
-            )
-        except HTTPException:
-            continue
-
-        if not odds_data.get("available"):
-            # Bet365 oranı yoksa öneriye sokma
-            continue
-
-        odd = odds_data.get("odds")
-
-        if not odd:
-            continue
-
-        probabilities = calculate_market_probability(
-            odd.get("home"),
-            odd.get("draw"),
-            odd.get("away"),
-        )
-
-        if not probabilities:
-            continue
-
-        # En yüksek MS olasılığı
-        max_probability = max(probabilities)
-        selection_index = probabilities.index(
-            max_probability
-        )
-
-        selection = ["MS 1", "MS X", "MS 2"][
-            selection_index
-        ]
-
-        analyzed.append(
-            {
-                "fixture": fixture,
-                "bet365": {
-                    "odds": odd,
-                    "update": odds_data.get(
-                        "update"
-                    ),
-                },
-                "analysis": {
-                    "selection": selection,
-                    "probability": max_probability,
-                    "probabilities": {
-                        "MS1": probabilities[0],
-                        "MSX": probabilities[1],
-                        "MS2": probabilities[2],
-                    },
-                },
-            }
-        )
-
-    analyzed.sort(
-        key=lambda x: x["analysis"]["probability"],
-        reverse=True,
-    )
-
-    return {
-        "status": "ok",
-        "bet365_only": True,
-        "count": len(analyzed),
-        "top5": analyzed[:5],
-        "fixtures_total": len(fixture_list),
-        "errors": fixture_response.get(
-            "errors",
-            [],
+        "settled_matches": total,
+        "top_pick_accuracy": round(hits / total, 4),
+        "brier_score": round(brier_sum / total, 4),
+        "note": (
+            "Brier skoru dusukse model daha iyi kalibre demektir. Bu rapor "
+            "gercek sonuclarla olculur, iddia degildir."
         ),
     }
